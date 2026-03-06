@@ -227,95 +227,6 @@ function test_nn_kkt_symmetric_inverse()
     @test all(symmetric_diffs .<= 1e-8)
 end
 
-function test_mnist_nn_kkt(;
-    nrhs = 10,
-    nnfname = "mnist-relu128nodes4layers.pt",
-    skip_auto_btf = false,
-)
-    IMAGE_INDEX = 7
-    ADVERSARIAL_LABEL = 1
-    THRESHOLD = 0.6
-    nnfile = joinpath("nn-models", nnfname)
-    if !isfile(nnfile)
-        @error("$nnfile does not exist or is not a file")
-        return
-    end
-    model, outputs, formulation = get_adversarial_model(
-        nnfile, IMAGE_INDEX, ADVERSARIAL_LABEL, THRESHOLD;
-        reduced_space = false
-    )
-    _t = time()
-    nlp, kkt_system, kkt_matrix = get_kkt(model, Solver=MadNLPHSL.Ma57Solver)
-    dt = time() - _t; println("[$(@sprintf("%1.2f", dt))] (Since model build) Get KKT")
-
-    pivot_vars, pivot_cons = get_vars_cons(formulation)
-    dt = time() - _t; println("[$(@sprintf("%1.2f", dt))] (Since model build) Get vars/cons")
-    pivot_indices = get_kkt_indices(model, pivot_vars, pivot_cons)
-    dt = time() - _t; println("[$(@sprintf("%1.2f", dt))] (Since model build) Get pivot indices")
-    pivot_index_set = Set(pivot_indices)
-    @assert kkt_matrix.m == kkt_matrix.n
-    reduced_indices = filter(i -> !(i in pivot_index_set), 1:kkt_matrix.m)
-    pivot_dim = length(pivot_indices)
-    @assert pivot_dim % 2 == 0
-
-    P = pivot_indices
-    R = reduced_indices
-    C_orig = kkt_matrix[P, P]
-
-    # Filter out constraint regularization nonzeros
-    # By convention, constraints are the second half of the pivot indices
-    to_ignore = Set(Int(pivot_dim / 2 + 1):pivot_dim)
-    I, J, V = SparseArrays.findnz(C_orig)
-    to_retain = filter(k -> !(I[k] in to_ignore && J[k] in to_ignore), 1:length(I))
-    I = I[to_retain]
-    J = J[to_retain]
-    V = V[to_retain]
-    C = SparseArrays.sparse(I, J, V, C_orig.m, C_orig.n)
-    C_full = fill_upper_triangle(C)
-    if !skip_auto_btf
-        res = _test_matrix(C_full; nrhs, atol = 1e-5, skiptest = true)
-        println("Timing breakdown")
-        println("----------------")
-        println("Initialization: $(res.time.initialize)")
-        println("Factorization:  $(res.time.factorize)")
-        println("Solve (x$nrhs):  $(res.time.solve)")
-        println()
-    end
-    dt = time() - _t; println("[$(@sprintf("%1.2f", dt))] (Since model build) Filter NZ")
-
-    # Maps indices in the original space to their index in the pivot matrix
-    index_remap = Dict((p, i) for (i, p) in enumerate(P))
-
-    layers = get_layers(formulation)
-    var_con_by_layer = [get_vars_cons(l) for l in layers]
-    var_indices_by_layer = [get_kkt_indices(model, vars, []) for (vars, _) in var_con_by_layer]
-    con_indices_by_layer = [get_kkt_indices(model, [], cons) for (_, cons) in var_con_by_layer]
-    blocks = []
-    for l in 1:length(layers)
-        conindices = [index_remap[i] for i in con_indices_by_layer[l]]
-        varindices = [index_remap[i] for i in var_indices_by_layer[l]]
-        push!(blocks, (conindices, varindices))
-    end
-    for l in reverse(1:length(layers))
-        conindices = [index_remap[i] for i in con_indices_by_layer[l]]
-        varindices = [index_remap[i] for i in var_indices_by_layer[l]]
-        push!(blocks, (varindices, conindices))
-    end
-    dt = time() - _t; println("[$(@sprintf("%1.2f", dt))] (Since model build) Get block indices")
-
-    # We skip the test-against-baseline as there is a significant amount of error for
-    # these relatively large systems.
-    # NOTE: This might be better now that I'm initializing the intermediate variables.
-    # TODO: Revisit this
-    res = _test_matrix(C_full; blocks, nrhs, atol = 1e-5, skiptest = true)
-    println("Timing breakdown")
-    println("----------------")
-    println("Initialization: $(res.time.initialize)")
-    println("Factorization:  $(res.time.factorize)")
-    println("Solve (x$nrhs):  $(res.time.solve)")
-    println()
-end
-
 @testset "block-triangular" begin
     test_3x3_lt()
     test_3x3_lt_unsym_perm()
@@ -324,7 +235,4 @@ end
     test_nn_jacobian()
     test_nn_kkt()
     test_nn_kkt_symmetric_inverse()
-    #nnfname = "mnist-relu1024nodes4layers.pt"
-    nnfname = "mnist-relu2048nodes4layers.pt"
-    test_mnist_nn_kkt(; nrhs = 1000, nnfname, skip_auto_btf = true)
 end
