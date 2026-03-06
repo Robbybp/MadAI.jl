@@ -80,6 +80,35 @@ function get_small_nn_feasible_point(
     return solution
 end
 
+function get_deterministic_nn_model()
+    model = JuMP.Model()
+    input_dimen = 100
+    # Optimization problem converges infeasible for hidden dim = 1000. I should
+    # find a more reliable way to initialize trivial optimization+NN problems
+    hidden1_dimen = 100
+    hidden2_dimen = 100
+    output_dimen = 10
+    JuMP.@variable(model, x[1:100] >= 0)
+    JuMP.@objective(model, Min, sum(x.^2))
+    A1 = ones(hidden1_dimen, input_dimen)
+    b1 = ones(hidden1_dimen)
+    A2 = ones(hidden2_dimen, hidden1_dimen)
+    b2 = ones(hidden2_dimen)
+    A3 = ones(output_dimen, hidden2_dimen)
+    b3 = ones(output_dimen)
+    f = MOAI.Pipeline(
+        MOAI.Affine(-A1, b1),
+        MOAI.Sigmoid(),
+        MOAI.Affine(A2, b2),
+        MOAI.Sigmoid(),
+        MOAI.Affine(-A3, b3),
+    )
+    y, formulation = MOAI.add_predictor(model, f, x)
+    variables, constraints = get_vars_cons(formulation)
+    JuMP.@constraint(model, -75.0 .<= y .<= 75.0)
+    return model, (; formulation, variables, constraints)
+end
+
 function make_tiny_model()
     m = JuMP.Model()
     JuMP.@variable(m, x[1:3], start = 1.0)
