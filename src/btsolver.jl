@@ -3,8 +3,6 @@ import LinearAlgebra
 import MathProgIncidence
 import MadNLP
 
-include("blockdiagonal.jl")
-
 mutable struct BlockTriangularOptions <: MadNLP.AbstractOptions
     blocks::Union{Nothing,Vector{Tuple{Vector{Int},Vector{Int}}}}
     symmetric::Bool
