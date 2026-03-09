@@ -1,3 +1,5 @@
+import MadAI
+
 import MathOptAI as MOAI
 import JuMP
 import MadNLP, MadNLPHSL
@@ -7,15 +9,17 @@ import NLPModels, NLPModelsJuMP
 import Random
 import SparseArrays
 
+include("models.jl")
+
 Random.seed!(101)
 
-function block_triangularize(matrix::SparseArrays.SparseMatrixCSC)
-    igraph = MPIN.IncidenceGraphInterface(matrix)
-    blocks = MPIN.block_triangularize(igraph)
-    roworder = reduce(vcat, [r for (r, c) in blocks])
-    colorder = reduce(vcat, [c for (r, c) in blocks])
-    return roworder, colorder
-end
+#function block_triangularize(matrix::SparseArrays.SparseMatrixCSC)
+#    igraph = MPIN.IncidenceGraphInterface(matrix)
+#    blocks = MPIN.block_triangularize(igraph)
+#    roworder = reduce(vcat, [r for (r, c) in blocks])
+#    colorder = reduce(vcat, [c for (r, c) in blocks])
+#    return roworder, colorder
+#end
 
 optimizer = JuMP.optimizer_with_attributes(
     MadNLP.Optimizer,
@@ -23,10 +27,8 @@ optimizer = JuMP.optimizer_with_attributes(
     "linear_solver" => MadNLPHSL.Ma27Solver,
 )
 
-include("models.jl")
 m, info = make_small_nn_model()
 formulation = info.formulation
-include("linalg.jl")
 
 solve = false
 if solve
@@ -36,8 +38,7 @@ end
 
 nlp = NLPModelsJuMP.MathOptNLPModel(m)
 
-include("formulation.jl")
-nn_vars, nn_cons = get_vars_cons(formulation)
+nn_vars, nn_cons = MadAI.get_vars_cons(formulation)
 
 display_bt_nn_system = false
 if display_bt_nn_system
@@ -49,9 +50,8 @@ if display_bt_nn_system
     display(imat)
 end
 
-include("nlpmodels.jl")
 # These are the var/con orders in the MathOptNLPModel.
-varorder, conorder = get_var_con_order(m)
+varorder, conorder = MadAI.get_var_con_order(m)
 ScalarFunction = Union{
     MOI.ScalarAffineFunction,
     MOI.ScalarQuadraticFunction,
@@ -222,10 +222,10 @@ end
 #    #SparseArrays.lu(sm)
 #end
 
-opt = SchurComplementOptions(; pivot_indices = sym_indices)
+opt = MadAI.SchurComplementOptions(; pivot_indices = sym_indices)
 factorize = true
 if factorize
-    linear_solver = SchurComplementSolver(
+    linear_solver = MadAI.SchurComplementSolver(
         kkt_matrix;
         opt = opt,
     )

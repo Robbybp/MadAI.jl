@@ -1,6 +1,7 @@
+import MadAI
+
 import MathOptAI as MOAI
 import JuMP
-import Ipopt
 import MadNLP, MadNLPHSL
 import MathOptInterface as MOI
 import MathProgIncidence as MPIN
@@ -8,27 +9,25 @@ import NLPModels, NLPModelsJuMP
 import Random
 import SparseArrays
 
-include("linalg.jl")
-include("nlpmodels.jl")
 include("models.jl")
 
 #function main()
     m, info = make_tiny_model()
 
-    optimize = false
-    if optimize
-        JuMP.set_optimizer(m, Ipopt.Optimizer)
-        JuMP.set_optimizer_attribute(m, "linear_solver", "ma27")
-        JuMP.optimize!(m)
-        println("x: $(JuMP.value.(m[:x]))")
-        println("y: $(JuMP.value.(m[:y]))")
-    end
+    #optimize = false
+    #if optimize
+    #    JuMP.set_optimizer(m, Ipopt.Optimizer)
+    #    JuMP.set_optimizer_attribute(m, "linear_solver", "ma27")
+    #    JuMP.optimize!(m)
+    #    println("x: $(JuMP.value.(m[:x]))")
+    #    println("y: $(JuMP.value.(m[:y]))")
+    #end
 
     pivot_vars = [m[:y][1], m[:y][2]]
     pivot_cons = [m[:eq3], m[:eq4]]
 
     nlp = NLPModelsJuMP.MathOptNLPModel(m)
-    varorder, conorder = get_var_con_order(m)
+    varorder, conorder = MadAI.get_var_con_order(m)
     var_idx_map = Dict(var => i for (i, var) in enumerate(varorder))
     con_idx_map = Dict(con => i for (i, con) in enumerate(conorder))
     vindices = [var_idx_map[v] for v in pivot_vars]
@@ -66,8 +65,8 @@ include("models.jl")
     pivot_indices = convert(Vector{Int32}, pivot_indices)
     pivot_index_set = Set(pivot_indices)
     reduced_indices = filter(x -> !(x in pivot_index_set), 1:kkt_dim)
-    opt = SchurComplementOptions(; pivot_indices = pivot_indices)
-    schur_solver = SchurComplementSolver(kkt_matrix; opt)
+    opt = MadAI.SchurComplementOptions(; pivot_indices = pivot_indices)
+    schur_solver = MadAI.SchurComplementSolver(kkt_matrix; opt)
     ma27 = MadNLPHSL.Ma27Solver(kkt_matrix)
 
     # Have the KKT matrix. Now I can start testing some things...
