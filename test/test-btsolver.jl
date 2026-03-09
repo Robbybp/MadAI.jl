@@ -4,15 +4,12 @@ import MadNLP
 import MadNLPHSL
 import MathProgIncidence
 import NLPModels
+import NLPModelsJuMP
 import SparseArrays
+import MadAI
 using Test
 using Printf
-
-include("adversarial-image.jl")
-include("btsolver.jl")
 include("models.jl")
-include("nlpmodels.jl")
-include("linalg.jl")
 
 function _test_matrix(
     csc::SparseArrays.SparseMatrixCSC;
@@ -30,8 +27,8 @@ function _test_matrix(
 
     _t = time()
     if btsolver === nothing
-        opt = BlockTriangularOptions(; blocks, symmetric)
-        btsolver = BlockTriangularSolver(csc; opt)
+        opt = MadAI.BlockTriangularOptions(; blocks, symmetric)
+        btsolver = MadAI.BlockTriangularSolver(csc; opt)
     end
     t_init = time() - _t
     _t = time()
@@ -135,13 +132,13 @@ function test_nn_jacobian()
     # NOTE: This model is constructed with random numbers.
     # TODO: Use a deterministic model here.
     model, info = make_small_nn_model()
-    layers = get_layers(info.formulation)
-    var_con_by_layer = [get_vars_cons(l) for l in layers]
+    layers = MadAI.get_layers(info.formulation)
+    var_con_by_layer = [MadAI.get_vars_cons(l) for l in layers]
     # ... do FixRef constraints not get picked up by NLPModels?
     #JuMP.fix.(model[:x], 2.0; force = true)
     input_cons = JuMP.@constraint(model, model[:x] .== 2.0)
     nlp = NLPModelsJuMP.MathOptNLPModel(model)
-    vars, cons = get_var_con_order(model)
+    vars, cons = MadAI.get_var_con_order(model)
     var_index_map = Dict((var, i) for (i, var) in enumerate(vars))
     con_index_map = Dict((con, i) for (i, con) in enumerate(cons))
     input_block = [
@@ -172,9 +169,9 @@ end
 
 function test_nn_kkt()
     model, info = make_small_nn_model()
-    nlp, kkt_system, kkt_matrix = get_kkt(model)
-    pivot_indices = get_kkt_indices(model, info.variables, info.constraints)
-    kkt_matrix = fill_upper_triangle(kkt_matrix)
+    nlp, kkt_system, kkt_matrix = MadAI.get_kkt(model)
+    pivot_indices = MadAI.get_kkt_indices(model, info.variables, info.constraints)
+    kkt_matrix = MadAI.fill_upper_triangle(kkt_matrix)
     pivot_dim = length(pivot_indices)
     pivot_matrix = kkt_matrix[pivot_indices, pivot_indices]
 
@@ -193,9 +190,9 @@ end
 
 function test_nn_kkt_symmetric_inverse()
     model, info = make_small_nn_model()
-    nlp, kkt_system, kkt_matrix = get_kkt(model)
-    pivot_indices = get_kkt_indices(model, info.variables, info.constraints)
-    kkt_matrix = fill_upper_triangle(kkt_matrix)
+    nlp, kkt_system, kkt_matrix = MadAI.get_kkt(model)
+    pivot_indices = MadAI.get_kkt_indices(model, info.variables, info.constraints)
+    kkt_matrix = MadAI.fill_upper_triangle(kkt_matrix)
     pivot_dim = length(pivot_indices)
     pivot_matrix = kkt_matrix[pivot_indices, pivot_indices]
 
@@ -211,7 +208,7 @@ function test_nn_kkt_symmetric_inverse()
 
     # By using the identity matrix as the RHS, we recover the inverse.
     rhs = LinearAlgebra.diagm(ones(pivot_dim))
-    btsolver = BlockTriangularSolver(pivot_matrix)
+    btsolver = MadAI.BlockTriangularSolver(pivot_matrix)
     MadNLP.factorize!(btsolver)
     sol = copy(rhs)
     MadNLP.solve!(btsolver, sol)

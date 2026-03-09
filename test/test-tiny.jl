@@ -8,7 +8,6 @@ import MathProgIncidence as MPIN
 import NLPModels, NLPModelsJuMP
 import Random
 import SparseArrays
-
 include("models.jl")
 
 #function main()

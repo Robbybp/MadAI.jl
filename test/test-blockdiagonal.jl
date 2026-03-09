@@ -1,8 +1,7 @@
 import LinearAlgebra
 import MathProgIncidence as MPIN
+import MadAI
 using Test
-
-include("blockdiagonal.jl")
 
 function _test_matrix(matrix::Matrix; atol = 1e-8, nrhs = 10)
     dim, dim2 = matrix.size
@@ -10,7 +9,7 @@ function _test_matrix(matrix::Matrix; atol = 1e-8, nrhs = 10)
     rowscaling = LinearAlgebra.diagm(convert(Vector{Float64}, 1:dim))
     rhs = rowscaling * ones(dim, nrhs)
     rowcc, colcc = MPIN.connected_components(matrix)
-    bd = BlockDiagonalView(matrix, rowcc, colcc)
+    bd = MadAI.BlockDiagonalView(matrix, rowcc, colcc)
     lu = LinearAlgebra.lu(bd)
     sol = copy(rhs)
     LinearAlgebra.ldiv!(lu, sol)

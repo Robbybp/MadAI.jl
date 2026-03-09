@@ -3,23 +3,19 @@ import NLPModelsJuMP
 import MathOptAI as MOAI
 import MadNLP
 import MadNLPHSL
+import MadAI
 using Test
-
-include("linalg.jl")
-include("btsolver.jl")
-include("nlpmodels.jl")
-include("kkt-partition.jl")
 include("models.jl")
 
 function test_nn_kkt_solve()
     model, info = get_deterministic_nn_model()
-    pivot_indices = get_kkt_indices(model, info.variables, info.constraints)
+    pivot_indices = MadAI.get_kkt_indices(model, info.variables, info.constraints)
     pivot_indices = convert(Vector{Int32}, pivot_indices)
-    blocks = partition_indices_by_layer(model, info.formulation; indices = pivot_indices)
-    pivot_solver_opt = BlockTriangularOptions(; blocks)
+    blocks = MadAI.partition_indices_by_layer(model, info.formulation; indices = pivot_indices)
+    pivot_solver_opt = MadAI.BlockTriangularOptions(; blocks)
     madnlp_options = Dict{Symbol,Any}(
         :ReducedSolver => MadNLPHSL.Ma57Solver,
-        :PivotSolver => BlockTriangularSolver,
+        :PivotSolver => MadAI.BlockTriangularSolver,
         :pivot_indices => pivot_indices,
         :pivot_solver_opt => pivot_solver_opt,
     )
@@ -30,7 +26,7 @@ function test_nn_kkt_solve()
         tol = 1e-6,
         print_level = MadNLP.INFO,
         max_iter = 0,
-        linear_solver = SchurComplementSolver,
+        linear_solver = MadAI.SchurComplementSolver,
         madnlp_options...,
     )
     MadNLP.initialize!(madnlp)
@@ -38,12 +34,12 @@ function test_nn_kkt_solve()
     kkt_matrix = MadNLP.get_kkt(kkt_system)
 
     ma27 = MadNLPHSL.Ma27Solver(kkt_matrix)
-    opt = SchurComplementOptions(;
+    opt = MadAI.SchurComplementOptions(;
         pivot_indices,
-        PivotSolver = BlockTriangularSolver,
+        PivotSolver = MadAI.BlockTriangularSolver,
         pivot_solver_opt,
     )
-    schur = SchurComplementSolver(kkt_matrix; opt)
+    schur = MadAI.SchurComplementSolver(kkt_matrix; opt)
 
     MadNLP.factorize!(ma27)
     MadNLP.factorize!(schur)
@@ -63,18 +59,18 @@ end
 
 function test_madnlp_3iter()
     model, info = get_deterministic_nn_model()
-    pivot_indices = get_kkt_indices(model, info.variables, info.constraints)
+    pivot_indices = MadAI.get_kkt_indices(model, info.variables, info.constraints)
     pivot_indices = convert(Vector{Int32}, pivot_indices)
-    blocks = partition_indices_by_layer(model, info.formulation; indices = pivot_indices)
-    pivot_solver_opt = BlockTriangularOptions(; blocks)
+    blocks = MadAI.partition_indices_by_layer(model, info.formulation; indices = pivot_indices)
+    pivot_solver_opt = MadAI.BlockTriangularOptions(; blocks)
     optimizer = JuMP.optimizer_with_attributes(
         MadNLP.Optimizer,
-        "linear_solver" => SchurComplementSolver,
+        "linear_solver" => MadAI.SchurComplementSolver,
         "tol" => 1e-6,
         "max_iter" => 3,
         "print_level" => MadNLP.INFO,
         "ReducedSolver" => MadNLPHSL.Ma57Solver,
-        "PivotSolver" => BlockTriangularSolver,
+        "PivotSolver" => MadAI.BlockTriangularSolver,
         "pivot_indices" => pivot_indices,
         "pivot_solver_opt" => pivot_solver_opt,
     )
@@ -99,19 +95,19 @@ end
 
 function test_madnlp_solve()
     model, info = get_deterministic_nn_model()
-    pivot_indices = get_kkt_indices(model, info.variables, info.constraints)
+    pivot_indices = MadAI.get_kkt_indices(model, info.variables, info.constraints)
     pivot_indices = convert(Vector{Int32}, pivot_indices)
-    blocks = partition_indices_by_layer(model, info.formulation; indices = pivot_indices)
-    pivot_solver_opt = BlockTriangularOptions(; blocks)
+    blocks = MadAI.partition_indices_by_layer(model, info.formulation; indices = pivot_indices)
+    pivot_solver_opt = MadAI.BlockTriangularOptions(; blocks)
     optimizer = JuMP.optimizer_with_attributes(
         MadNLP.Optimizer,
-        "linear_solver" => SchurComplementSolver,
+        "linear_solver" => MadAI.SchurComplementSolver,
         "pivot_indices" => pivot_indices,
         "tol" => 1e-6,
         "max_iter" => 50,
         "print_level" => MadNLP.INFO,
         "ReducedSolver" => MadNLPHSL.Ma57Solver,
-        "PivotSolver" => BlockTriangularSolver,
+        "PivotSolver" => MadAI.BlockTriangularSolver,
         "pivot_indices" => pivot_indices,
         "pivot_solver_opt" => pivot_solver_opt,
     )

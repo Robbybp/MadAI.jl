@@ -1,0 +1,11 @@
+[deps]
+JuMP = "4076af6c-e467-56ae-b986-b466b2749572"
+MadAI = "94f69c0d-d3ee-4a7b-bab6-b665543fd223"
+MadNLP = "2621e9c9-9eb4-46b1-8089-e8c72242dfb6"
+MadNLPHSL = "7fb6135f-58fe-4112-84ca-653cf5be0c77"
+MathOptAI = "e52c2cb8-508e-4e12-9dd2-9c4755b60e73"
+MathOptInterface = "b8f27783-ece8-5eb3-8dc8-9495eed66fee"
+MathProgIncidence = "892fab00-3092-4bd0-9c46-66676a93f84e"
+NLPModels = "a4795742-8479-5a88-8948-cc11e1c8c1a6"
+NLPModelsJuMP = "792afdf1-32c1-5681-94e0-d7bf7a5df49e"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"

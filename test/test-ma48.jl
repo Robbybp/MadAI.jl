@@ -1,17 +1,15 @@
 import NLPModels
 import SparseArrays
 import LinearAlgebra
-
-include("ma48.jl")
+import MadNLP
+import MadAI
 include("models.jl")
-include("nlpmodels.jl")
-include("linalg.jl") # We just need fill_upper_triangle from this file
 
 m, info = make_tiny_model()
-_, _, matrix = get_kkt(m)
-csc = fill_upper_triangle(matrix)
+_, _, matrix = MadAI.get_kkt(m)
+csc = MadAI.fill_upper_triangle(matrix)
 
-ma48 = Ma48Solver(csc)
+ma48 = MadAI.Ma48Solver(csc)
 println("INFO after symbolic:")
 display(ma48.INFO)
 println("RINFO after symbolic:")

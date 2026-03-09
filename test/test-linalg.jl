@@ -7,13 +7,9 @@ import MathProgIncidence as MPIN
 import NLPModels, NLPModelsJuMP
 import Random
 import SparseArrays
+import MadAI
 using Test
-
-include("linalg.jl")
-include("nlpmodels.jl")
 include("models.jl")
-include("btsolver.jl")
-include("kkt-partition.jl")
 
 Random.seed!(1111)
 
@@ -24,8 +20,8 @@ function _test_factorize_nominal(
     pivot_solver_opt = nothing,
 )
     ma27 = MadNLPHSL.Ma27Solver(kkt_matrix)
-    opt = SchurComplementOptions(; pivot_indices, PivotSolver, pivot_solver_opt)
-    schur_solver = SchurComplementSolver(kkt_matrix; opt)
+    opt = MadAI.SchurComplementOptions(; pivot_indices, PivotSolver, pivot_solver_opt)
+    schur_solver = MadAI.SchurComplementSolver(kkt_matrix; opt)
 
     MadNLP.factorize!(ma27)
     MadNLP.factorize!(schur_solver)
@@ -44,8 +40,8 @@ function _test_solve_nominal(
     pivot_solver_opt = nothing,
 )
     ma27 = MadNLPHSL.Ma27Solver(kkt_matrix)
-    opt = SchurComplementOptions(; pivot_indices, PivotSolver, pivot_solver_opt)
-    schur_solver = SchurComplementSolver(kkt_matrix; opt)
+    opt = MadAI.SchurComplementOptions(; pivot_indices, PivotSolver, pivot_solver_opt)
+    schur_solver = MadAI.SchurComplementSolver(kkt_matrix; opt)
     MadNLP.factorize!(ma27)
     MadNLP.factorize!(schur_solver)
     sol_ma27 = copy(rhs)
@@ -69,15 +65,15 @@ function _test_solve_repeated(
     pivot_solver_opt = nothing,
     pivot_indices = nothing,
 ) # where T <: AbstractLinearSolver ?
-    nlp, kkt_system, kkt_matrix = get_kkt(model)
-    varorder, _ = get_var_con_order(model)
+    nlp, kkt_system, kkt_matrix = MadAI.get_kkt(model)
+    varorder, _ = MadAI.get_var_con_order(model)
     if pivot_indices === nothing
-        pivot_indices = get_kkt_indices(model, variables, constraints)
+        pivot_indices = MadAI.get_kkt_indices(model, variables, constraints)
     end
     ma27 = MadNLPHSL.Ma27Solver(kkt_matrix)
     pivot_indices = convert(Vector{Int32}, pivot_indices)
-    opt = SchurComplementOptions(; pivot_indices, PivotSolver=PivotSolver, ReducedSolver=Solver, pivot_solver_opt)
-    schur_solver = SchurComplementSolver(kkt_matrix; opt)
+    opt = MadAI.SchurComplementOptions(; pivot_indices, PivotSolver=PivotSolver, ReducedSolver=Solver, pivot_solver_opt)
+    schur_solver = MadAI.SchurComplementSolver(kkt_matrix; opt)
     nvar = NLPModels.get_nvar(nlp)
     for i in 1:nsamples
         x = rand(nvar) # Project this into bounds?
@@ -103,20 +99,20 @@ end
 
 function test_factorize_nominal_tiny(; PivotSolver = MadNLPHSL.Ma27Solver)
     m, info = make_tiny_model()
-    _, _, matrix = get_kkt(m)
-    indices = get_kkt_indices(m, info.variables, info.constraints)
+    _, _, matrix = MadAI.get_kkt(m)
+    indices = MadAI.get_kkt_indices(m, info.variables, info.constraints)
     _test_factorize_nominal(matrix, convert(Vector{Int32}, indices); PivotSolver)
     return
 end
 
 function test_factorize_nominal_small_nn(; PivotSolver = MadNLPHSL.Ma27Solver)
     m, info = make_small_nn_model()
-    _, _, matrix = get_kkt(m)
-    indices = get_kkt_indices(m, info.variables, info.constraints)
+    _, _, matrix = MadAI.get_kkt(m)
+    indices = MadAI.get_kkt_indices(m, info.variables, info.constraints)
     #indices = sort(indices)
-    if PivotSolver == BlockTriangularSolver
-        blocks = partition_indices_by_layer(m, info.formulation; indices)
-        pivot_solver_opt = BlockTriangularOptions(; blocks)
+    if PivotSolver == MadAI.BlockTriangularSolver
+        blocks = MadAI.partition_indices_by_layer(m, info.formulation; indices)
+        pivot_solver_opt = MadAI.BlockTriangularOptions(; blocks)
     else
         pivot_solver_opt = nothing
     end
@@ -126,8 +122,8 @@ end
 
 function test_solve_nominal_tiny(; PivotSolver = MadNLPHSL.Ma27Solver)
     m, info = make_tiny_model()
-    _, _, matrix = get_kkt(m)
-    indices = get_kkt_indices(m, info.variables, info.constraints)
+    _, _, matrix = MadAI.get_kkt(m)
+    indices = MadAI.get_kkt_indices(m, info.variables, info.constraints)
     println(PivotSolver)
     _test_solve_nominal(matrix, convert(Vector{Int32}, indices); PivotSolver)
     return
@@ -135,14 +131,14 @@ end
 
 function test_solve_nominal_small_nn(; PivotSolver = MadNLPHSL.Ma27Solver)
     m, info = make_small_nn_model()
-    _, _, matrix = get_kkt(m)
-    indices = get_kkt_indices(m, info.variables, info.constraints)
+    _, _, matrix = MadAI.get_kkt(m)
+    indices = MadAI.get_kkt_indices(m, info.variables, info.constraints)
     #indices = sort(indices)
-    if PivotSolver == BlockTriangularSolver
+    if PivotSolver == MadAI.BlockTriangularSolver
         # These blocks are in the space of the pivot matrix's indices.
         # Their order corresponds to the order of indices from get_kkt_indices.
-        blocks = partition_indices_by_layer(m, info.formulation; indices)
-        pivot_solver_opt = BlockTriangularOptions(; blocks)
+        blocks = MadAI.partition_indices_by_layer(m, info.formulation; indices)
+        pivot_solver_opt = MadAI.BlockTriangularOptions(; blocks)
     else
         pivot_solver_opt = nothing
     end
@@ -159,11 +155,11 @@ end
 
 function test_solve_repeated_small_nn(; PivotSolver = MadNLPHSL.Ma27Solver, atol = 1e-8)
     m, info = make_small_nn_model()
-    indices = get_kkt_indices(m, info.variables, info.constraints)
+    indices = MadAI.get_kkt_indices(m, info.variables, info.constraints)
     #indices = sort(indices)
-    if PivotSolver == BlockTriangularSolver
-        blocks = partition_indices_by_layer(m, info.formulation; indices)
-        pivot_solver_opt = BlockTriangularOptions(; blocks)
+    if PivotSolver == MadAI.BlockTriangularSolver
+        blocks = MadAI.partition_indices_by_layer(m, info.formulation; indices)
+        pivot_solver_opt = MadAI.BlockTriangularOptions(; blocks)
     else
         pivot_solver_opt = nothing
     end
@@ -173,14 +169,14 @@ end
 
 function test_nlp_solve_tiny(; PivotSolver = MadNLPHSL.Ma27Solver)
     m, info = make_tiny_model()
-    nlp, _, _ = get_kkt(m)
-    pivot_indices = get_kkt_indices(m, info.variables, info.constraints)
+    nlp, _, _ = MadAI.get_kkt(m)
+    pivot_indices = MadAI.get_kkt_indices(m, info.variables, info.constraints)
     pivot_indices = convert(Vector{Int32}, pivot_indices)
     optimizer = JuMP.optimizer_with_attributes(
         MadNLP.Optimizer,
         "tol" => 1e-6,
         #"linear_solver" => MadNLPHSL.Ma27Solver,
-        "linear_solver" => SchurComplementSolver,
+        "linear_solver" => MadAI.SchurComplementSolver,
         "pivot_indices" => pivot_indices,
         "PivotSolver" => PivotSolver,
     )
@@ -192,14 +188,14 @@ end
 
 function test_nlp_solve_small_nn(; PivotSolver = MadNLPHSL.Ma57Solver)
     m, info = make_small_nn_model()
-    nlp, _, _ = get_kkt(m)
-    pivot_indices = get_kkt_indices(m, info.variables, info.constraints)
+    nlp, _, _ = MadAI.get_kkt(m)
+    pivot_indices = MadAI.get_kkt_indices(m, info.variables, info.constraints)
     pivot_indices = convert(Vector{Int32}, pivot_indices)
     #pivot_indices = sort(pivot_indices)
     # Looks like we can do this with the
-    if PivotSolver == BlockTriangularSolver
-        blocks = partition_indices_by_layer(m, info.formulation; indices = pivot_indices)
-        pivot_solver_opt = BlockTriangularOptions(; blocks)
+    if PivotSolver == MadAI.BlockTriangularSolver
+        blocks = MadAI.partition_indices_by_layer(m, info.formulation; indices = pivot_indices)
+        pivot_solver_opt = MadAI.BlockTriangularOptions(; blocks)
     else
         pivot_solver_opt = nothing
     end
@@ -207,7 +203,7 @@ function test_nlp_solve_small_nn(; PivotSolver = MadNLPHSL.Ma57Solver)
         MadNLP.Optimizer,
         "tol" => 1e-6,
         #"linear_solver" => MadNLPHSL.Ma27Solver,
-        "linear_solver" => SchurComplementSolver,
+        "linear_solver" => MadAI.SchurComplementSolver,
         "pivot_indices" => pivot_indices,
         "PivotSolver" => PivotSolver,
         "pivot_solver_opt" => pivot_solver_opt,
@@ -221,11 +217,11 @@ end
 
 function test_timer()
     m, info = make_tiny_model()
-    _, _, kkt_matrix = get_kkt(m)
-    pivot_indices = get_kkt_indices(m, info.variables, info.constraints)
+    _, _, kkt_matrix = MadAI.get_kkt(m)
+    pivot_indices = MadAI.get_kkt_indices(m, info.variables, info.constraints)
     pivot_indices = convert(Vector{Int32}, pivot_indices)
-    opt = SchurComplementOptions(; pivot_indices)
-    solver = SchurComplementSolver(kkt_matrix; opt)
+    opt = MadAI.SchurComplementOptions(; pivot_indices)
+    solver = MadAI.SchurComplementSolver(kkt_matrix; opt)
     @test solver.timer.initialize > 0.0
     @test solver.timer.factorize.total == 0.0
     @test solver.timer.solve == 0.0
@@ -261,14 +257,14 @@ end
 
     # Tests with BTSolver
     if true
-        test_factorize_nominal_tiny(PivotSolver = BlockTriangularSolver)
-        test_solve_nominal_tiny(PivotSolver = BlockTriangularSolver)
-        test_solve_repeated_tiny(PivotSolver = BlockTriangularSolver)
-        test_nlp_solve_tiny(PivotSolver = BlockTriangularSolver)
+        test_factorize_nominal_tiny(PivotSolver = MadAI.BlockTriangularSolver)
+        test_solve_nominal_tiny(PivotSolver = MadAI.BlockTriangularSolver)
+        test_solve_repeated_tiny(PivotSolver = MadAI.BlockTriangularSolver)
+        test_nlp_solve_tiny(PivotSolver = MadAI.BlockTriangularSolver)
 
-        test_factorize_nominal_small_nn(PivotSolver = BlockTriangularSolver)
-        test_solve_nominal_small_nn(PivotSolver = BlockTriangularSolver)
-        test_solve_repeated_small_nn(; PivotSolver = BlockTriangularSolver, atol = 1e-4)
-        #test_nlp_solve_small_nn(; PivotSolver = BlockTriangularSolver)
+        test_factorize_nominal_small_nn(PivotSolver = MadAI.BlockTriangularSolver)
+        test_solve_nominal_small_nn(PivotSolver = MadAI.BlockTriangularSolver)
+        test_solve_repeated_small_nn(; PivotSolver = MadAI.BlockTriangularSolver, atol = 1e-4)
+        #test_nlp_solve_small_nn(; PivotSolver = MadAI.BlockTriangularSolver)
     end
 end
