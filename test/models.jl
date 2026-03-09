@@ -2,6 +2,7 @@ import JuMP
 import MathOptAI as MOAI
 import MadNLP
 import NLPModels
+import Random
 
 if !isdefined(@__MODULE__, :_MODELS_INCLUDED)
     const _MODELS_INCLUDED = true
@@ -107,6 +108,43 @@ if !isdefined(@__MODULE__, :_MODELS_INCLUDED)
         y, formulation = MOAI.add_predictor(model, f, x)
         variables, constraints = MadAI.get_vars_cons(formulation)
         JuMP.@constraint(model, -75.0 .<= y .<= 75.0)
+        return model, (; formulation, variables, constraints)
+    end
+
+    """
+    This solves with:
+    - hidden_dim = 256 (default)
+    - hidden_dim = 512
+    - hidden_dim = 1024
+
+    Solves are slow. Up to 600 iterations, but initial KKT matrices seem
+    like they should be fine for analysis.
+    """
+    function get_synthetic_nn_model(;
+        input_dim = 128,
+        hidden_dim = 256,
+        output_dim = 64,
+        n_hidden = 2,
+        random_seed = 1,
+        Activation = () -> MOAI.Tanh(),
+    )
+        Random.seed!(random_seed)
+        model = JuMP.Model()
+        JuMP.@variable(model, -10.0 <= x[1:input_dim] <= 10.0)
+        JuMP.@objective(model, Min, sum(x .^ 2))
+        layers = [
+            MOAI.Affine(rand(hidden_dim, input_dim), rand(hidden_dim)),
+            Activation(),
+        ]
+        for _ in 1:n_hidden
+            push!(layers, MOAI.Affine(rand(hidden_dim, hidden_dim), rand(hidden_dim)))
+            push!(layers, Activation())
+        end
+        push!(layers, MOAI.Affine(rand(output_dim, hidden_dim), rand(output_dim)))
+        f = MOAI.Pipeline(layers...)
+        y, formulation = MOAI.add_predictor(model, f, x)
+        variables, constraints = MadAI.get_vars_cons(formulation)
+        JuMP.@constraint(model, sum(y) >= 0.3 * output_dim)
         return model, (; formulation, variables, constraints)
     end
 
