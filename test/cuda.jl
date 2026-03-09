@@ -36,20 +36,21 @@ function _get_pivot_lowertri_order(matrix)
     return rp, cp
 end
 
-function test_cuda_synthetic()
+function test_cuda_linearsolve_synthetic()
     model, info = get_synthetic_nn_model()
+    formulation = info.formulation
 
     # I will construct random RHSs below. Note that this must happen
     # _after_ constructing the synthetic model, which resets the seed.
     Random.seed!(101)
 
-    formulation = info.formulation
-
     pivot_vars, pivot_cons = MadAI.get_vars_cons(formulation)
     pivot_indices = MadAI.get_kkt_indices(model, pivot_vars, pivot_cons)
     pivot_indices = convert(Vector{Int32}, pivot_indices)
-    # We probably won't use these here...
-    blocks = MadAI.partition_indices_by_layer(model, formulation; indices = pivot_indices)
+    # We probably won't use these here... It is an open question whether or not
+    # we can do something faster than CUSPARSE with our knowledge of where the
+    # dense blocks are.
+    #blocks = MadAI.partition_indices_by_layer(model, formulation; indices = pivot_indices)
 
     nlp = NLPModelsJuMP.MathOptNLPModel(model)
     madnlp = MadNLP.MadNLPSolver(nlp)
@@ -62,9 +63,6 @@ function test_cuda_synthetic()
     rhs = rand(N, nrhs)
 
     ny = Int(N / 2)
-
-    # 1. Reorder matrix to be lower triangular
-    # 2. Backsolve with CUSOLVER
 
     # Lower triangle-to-full
     C = C + C' - LinearAlgebra.Diagonal(C)
@@ -96,6 +94,38 @@ function test_cuda_synthetic()
     Δ_gpu = LinearAlgebra.norm(r_gpu, Inf)
     println("GPU max residual: $Δ_gpu")
     @test Δ_gpu <= 1e-4
+    return
+end
+
+function test_cuda_construct_schur_synthetic(; sparse = false)
+    model, info = get_synthetic_nn_model()
+    formulation = info.formulation
+
+    pivot_vars, pivot_cons = MadAI.get_vars_cons(formulation)
+    pivot_indices = MadAI.get_kkt_indices(model, pivot_vars, pivot_cons)
+    pivot_indices = convert(Vector{Int32}, pivot_indices)
+
+    nlp = NLPModelsJuMP.MathOptNLPModel(model)
+    madnlp = MadNLP.MadNLPSolver(nlp)
+    MadNLP.initialize!(madnlp)
+    kkt_system = madnlp.kkt
+    kkt_matrix = MadNLP.get_kkt(kkt_system)
+    C = kkt_matrix[pivot_indices, pivot_indices]
+    N = kkt_matrix.n
+
+    index_set = Set(pivot_indices)
+    reduced_indices = filter(i -> !(i in index_set), 1:N)
+    # I don't need the RHS to construct the Schur complement, but it might be nice
+    # to test the full solve here, in which case I will need it.
+    #orig_rhs_reduced = rhs[reduced_indices]
+    #orig_rhs_pivot = rhs[pivot_indices]
+    P = solver.pivot_indices
+    R = reduced_indices
+    A = solver.csc[R, R]
+    B = solver.csc[P, R] + solver.csc[R, P]'
+
+    # TODO: Run this on GPU
+    S = A - B' * C \ B
     return
 end
 
