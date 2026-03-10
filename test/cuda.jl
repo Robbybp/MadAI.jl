@@ -162,6 +162,11 @@ function test_cuda_construct_schur_synthetic(; sparse = false)
         S_cpu = Matrix(S_gpu)
     end
 
+    is_sym = LinearAlgebra.issymmetric(S_cpu)
+    println("S symmetric: $is_sym")
+    sym_error = abs.(S_cpu - S_cpu')
+    println("Max(|S - S'|) = $(maximum(sym_error))")
+
     # Tests for the Schur complement:
     # - symmetric (or close to it)
     # - nonsingular
