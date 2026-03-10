@@ -112,6 +112,8 @@ function test_cuda_construct_schur_synthetic(; sparse = false)
     kkt_matrix = MadNLP.get_kkt(kkt_system)
     C = kkt_matrix[pivot_indices, pivot_indices]
     N = kkt_matrix.n
+    pivot_dim = C.n
+    schur_dim = kkt_matrix.n - pivot_dim
 
     index_set = Set(pivot_indices)
     reduced_indices = filter(i -> !(i in index_set), 1:N)
@@ -119,16 +121,39 @@ function test_cuda_construct_schur_synthetic(; sparse = false)
     # to test the full solve here, in which case I will need it.
     #orig_rhs_reduced = rhs[reduced_indices]
     #orig_rhs_pivot = rhs[pivot_indices]
-    P = solver.pivot_indices
+    P = pivot_indices
     R = reduced_indices
-    A = solver.csc[R, R]
-    B = solver.csc[P, R] + solver.csc[R, P]'
+    A = kkt_matrix[R, R]
+    B = kkt_matrix[P, R] + kkt_matrix[R, P]'
 
-    # TODO: Run this on GPU
-    S = A - B' * C \ B
+    C = C + C' - LinearAlgebra.Diagonal(C)
+    roworder, colorder = _get_pivot_lowertri_order(C)
+    C_perm = C[roworder, colorder]
+    # This relies on the pivot indices being provided in a lower triangular order.
+    # Because I parse the NN formulation to obtain these indices, I know this is
+    # the case. In general, I may have to reorder these pivot indices.
+    @assert LinearAlgebra.istril(C_perm)
+
+    if sparse
+        A_gpu = CuSparseMatrixCSR(A)
+        # Do I need to pre-allocate all nonzeros that can possibly be filled?
+        S_gpu = CuSparseMatrixCSR(A)
+    else
+        A_gpu = CUDA.CuMatrix(A)
+        S_gpu = CUDA.zeros(Float64, schur_dim, schur_dim)
+    end
+    B_gpu = CUDA.CuMatrix(B)
+    C_gpu = CuSparseMatrixCSR(C_perm)
+    LT_gpu = LinearAlgebra.LowerTriangular(C_gpu)
+    # I could just override B...
+    temp = CUDA.CuMatrix(copy(B_gpu))
+
+    LinearAlgebra.ldiv!(temp, LT_gpu, B_gpu)
+    S_gpu .= A_gpu - B_gpu' * temp
     return
 end
 
 @testset "basic-cuda" begin
-    test_cuda_synthetic()
+    test_cuda_linearsolve_synthetic()
+    test_cuda_construct_schur_synthetic()
 end
