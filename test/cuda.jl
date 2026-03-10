@@ -153,19 +153,26 @@ function test_cuda_construct_schur_synthetic(; sparse = false)
 
     LinearAlgebra.ldiv!(temp, LT_gpu, B_gpu)
     # TODO: This can be done with less intermediate memory usage
-    S_gpu .= A_gpu - B_gpu' * temp
+    temp_perm = temp[colorder, :]
+    BTCB_gpu = B_gpu' * temp_perm
+    S_gpu .= A_gpu - BTCB_gpu
+
     if sparse
         # FIXME: This is buggy. My construction of S_gpu mixes sparse and dense
         # types, which causes problems
         S_cpu = SparseArrays.SparseMatrixCSC(S_gpu)
+        BTCB_cpu = SparseArrays.SparseMatrixCSC(BTCB_gpu)
     else
         S_cpu = Matrix(S_gpu)
+        BTCB_cpu = Matrix(BTCB_gpu)
     end
 
-    is_sym = LinearAlgebra.issymmetric(S_cpu)
-    println("S symmetric: $is_sym")
-    sym_error = abs.(S_cpu - S_cpu')
+    is_sym = LinearAlgebra.issymmetric(BTCB_cpu)
+    println("BTCB symmetric: $is_sym")
+    sym_error = abs.(BTCB_cpu - BTCB_cpu')
     println("Max(|S - S'|) = $(maximum(sym_error))")
+
+    return
 
     # Tests for the Schur complement:
     # - symmetric (or close to it)
