@@ -144,17 +144,22 @@ function test_cuda_construct_schur_synthetic(; sparse = false)
         A_gpu = CUDA.CuMatrix(A)
         S_gpu = CUDA.zeros(Float64, schur_dim, schur_dim)
     end
-    B_perm = B[roworder, :]
-    B_gpu = CUDA.CuMatrix(B_perm)
+    # Transfer B to GPU. We don't permute it yet because we still need the original
+    B_gpu = CUDA.CuMatrix(B)
+    # Allocate a permuted B on GPU
+    B_gpu_perm = B_gpu[roworder, :]
     C_gpu = CuSparseMatrixCSR(C_perm)
     LT_gpu = LinearAlgebra.LowerTriangular(C_gpu)
-    # I could just override B...
-    temp = CUDA.CuMatrix(copy(B_gpu))
+    # This will store the intermediate product C^-1 B
+    temp = CUDA.CuMatrix(copy(B_gpu_perm))
 
-    LinearAlgebra.ldiv!(temp, LT_gpu, B_gpu)
+    # Compute C^-1 B (in the permuted-column space)
+    LinearAlgebra.ldiv!(temp, LT_gpu, B_gpu_perm)
     # TODO: This can be done with less intermediate memory usage
-    temp_perm = temp[colorder, :]
-    BTCB_gpu = B_gpu' * temp_perm
+    # We use the original B. The intermediate product's rows have
+    # the inverse column permutation (of C) applied. So we apply the
+    # forward column permutation to these rows.
+    BTCB_gpu = B_gpu' * temp[colorder, :]
     S_gpu .= A_gpu - BTCB_gpu
 
     if sparse
@@ -167,10 +172,15 @@ function test_cuda_construct_schur_synthetic(; sparse = false)
         BTCB_cpu = Matrix(BTCB_gpu)
     end
 
+    # Since A is only the lower triangle, S isn't symmetric, so we check
+    # the symmetry of (B^T C^-1 B)
     is_sym = LinearAlgebra.issymmetric(BTCB_cpu)
     println("BTCB symmetric: $is_sym")
     sym_error = abs.(BTCB_cpu - BTCB_cpu')
     println("Max(|S - S'|) = $(maximum(sym_error))")
+
+    # Remove extra nonzeros in the upper triangle (from BTCB)
+    S_gpu .= LinearAlgebra.tril(S_gpu)
 
     return
 
