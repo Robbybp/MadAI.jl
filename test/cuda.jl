@@ -241,8 +241,51 @@ function test_cuda_construct_schur_synthetic(; sparse = false)
     return
 end
 
+function test_cpu_construct_schur_synthetic()
+    model, info = get_synthetic_nn_model()
+    formulation = info.formulation
+
+    pivot_vars, pivot_cons = MadAI.get_vars_cons(formulation)
+    pivot_indices = MadAI.get_kkt_indices(model, pivot_vars, pivot_cons)
+    pivot_indices = convert(Vector{Int32}, pivot_indices)
+
+    nlp = NLPModelsJuMP.MathOptNLPModel(model)
+    madnlp = MadNLP.MadNLPSolver(nlp)
+    MadNLP.initialize!(madnlp)
+    kkt_system = madnlp.kkt
+    kkt_matrix = MadNLP.get_kkt(kkt_system)
+    C = kkt_matrix[pivot_indices, pivot_indices]
+    N = kkt_matrix.n
+
+    index_set = Set(pivot_indices)
+    reduced_indices = filter(i -> !(i in index_set), 1:N)
+    P = pivot_indices
+    R = reduced_indices
+    A = kkt_matrix[R, R]
+    B = kkt_matrix[P, R] + kkt_matrix[R, P]'
+
+    C = C + C' - LinearAlgebra.Diagonal(C)
+    @assert LinearAlgebra.issymmetric(C)
+    roworder, colorder = _get_pivot_lowertri_order(C)
+    C_perm = C[roworder, colorder]
+    @assert LinearAlgebra.istril(C_perm)
+
+    B_perm = B[roworder, :]
+    temp = LinearAlgebra.LowerTriangular(C_perm) \ B_perm
+    temp_unperm = temp[invperm(colorder), :]
+    BTCB = B' * temp_unperm
+    S = A - BTCB
+
+    is_sym = LinearAlgebra.issymmetric(BTCB)
+    println("CPU Schur symmetric: $is_sym")
+    sym_error = abs.(BTCB - BTCB')
+    println("CPU max(|S - S'|) = $(maximum(sym_error))")
+    return
+end
+
 @testset "basic-cuda" begin
     #test_cuda_linearsolve_synthetic()
-    test_cuda_construct_schur_synthetic()
+    test_cpu_construct_schur_synthetic()
+    #test_cuda_construct_schur_synthetic()
     #test_cuda_construct_schur_synthetic(; sparse = true)
 end
