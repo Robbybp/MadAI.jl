@@ -143,7 +143,8 @@ function test_cuda_construct_schur_synthetic(; sparse = false)
         A_gpu = CUDA.CuMatrix(A)
         S_gpu = CUDA.zeros(Float64, schur_dim, schur_dim)
     end
-    B_gpu = CUDA.CuMatrix(B)
+    B_perm = B[roworder, :]
+    B_gpu = CUDA.CuMatrix(B_perm)
     C_gpu = CuSparseMatrixCSR(C_perm)
     LT_gpu = LinearAlgebra.LowerTriangular(C_gpu)
     # I could just override B...
@@ -167,12 +168,45 @@ function test_cuda_construct_schur_synthetic(; sparse = false)
     # - Can be used to solve the original linear system
     # - Yields correct inertia
 
-    nrhs = 10
+    nrhs = 5
     rhs_cpu = rand(N, nrhs)
     ma57 = MadNLPHSL.Ma57Solver(kkt_matrix)
     MadNLP.factorize!(ma57)
     sol_cpu = copy(rhs_cpu)
     MadNLP.solve!(ma57, sol_cpu)
+
+    if !sparse
+        rhs_reduced = rhs_cpu[R, :]
+        rhs_pivot = rhs_cpu[P, :]
+        rhs_pivot_perm = rhs_pivot[roworder, :]
+
+        rhs_reduced_gpu = CUDA.CuMatrix(rhs_reduced)
+        rhs_pivot_perm_gpu = CUDA.CuMatrix(rhs_pivot_perm)
+
+        # Solve C * Z = B (already computed in temp) and C * y = g
+        Cg_gpu = CUDA.CuMatrix(copy(rhs_pivot_perm_gpu))
+        LinearAlgebra.ldiv!(Cg_gpu, LT_gpu, rhs_pivot_perm_gpu)
+
+        schur_rhs_gpu = rhs_reduced_gpu - B_gpu' * Cg_gpu
+        x_gpu = CUDA.CuMatrix(copy(schur_rhs_gpu))
+        LinearAlgebra.ldiv!(x_gpu, S_gpu, schur_rhs_gpu)
+
+        rhs_pivot_corr_gpu = rhs_pivot_perm_gpu - B_gpu * x_gpu
+        y_perm_gpu = CUDA.CuMatrix(copy(rhs_pivot_corr_gpu))
+        LinearAlgebra.ldiv!(y_perm_gpu, LT_gpu, rhs_pivot_corr_gpu)
+
+        x = Matrix(x_gpu)
+        y_perm = Matrix(y_perm_gpu)
+        y = y_perm[invperm(roworder), :]
+
+        sol_schur = zeros(N, nrhs)
+        sol_schur[R, :] = x
+        sol_schur[P, :] = y
+
+        err = maximum(abs.(sol_schur - sol_cpu))
+        println("Schur GPU vs MA57 CPU max error: $err")
+        @test err <= 1e-4
+    end
     return
 end
 
