@@ -10,6 +10,7 @@ import SparseArrays
 import Random
 import CUDA
 import CUDA.CUSPARSE: CuSparseMatrixCSR
+import CUDA.CUSOLVER
 using Test
 
 include("models.jl")
@@ -153,7 +154,6 @@ function test_cuda_construct_schur_synthetic(; sparse = false)
     LinearAlgebra.ldiv!(temp, LT_gpu, B_gpu)
     # TODO: This can be done with less intermediate memory usage
     S_gpu .= A_gpu - B_gpu' * temp
-    display(S_gpu)
     if sparse
         # FIXME: This is buggy. My construction of S_gpu mixes sparse and dense
         # types, which causes problems
@@ -189,7 +189,16 @@ function test_cuda_construct_schur_synthetic(; sparse = false)
 
         schur_rhs_gpu = rhs_reduced_gpu - B_gpu' * Cg_gpu
         x_gpu = CUDA.CuMatrix(copy(schur_rhs_gpu))
-        LinearAlgebra.ldiv!(x_gpu, S_gpu, schur_rhs_gpu)
+
+        # LBL'
+        F_gpu, ipiv_gpu, _ = CUSOLVER.sytrf!('L', S_gpu)
+        ipiv_gpu = CUDA.CuVector{Int64}(ipiv_gpu)
+        CUSOLVER.sytrs!('L', F_gpu, ipiv_gpu, x_gpu)
+
+        # LU
+        #F_gpu, ipiv_gpu, _ = CUSOLVER.Xgetrf!(S_gpu)
+        ## 'N' for "not transpose", of course
+        #CUSOLVER.Xgetrs!('N', F_gpu, ipiv_gpu, x_gpu)
 
         rhs_pivot_corr_gpu = rhs_pivot_perm_gpu - B_gpu * x_gpu
         y_perm_gpu = CUDA.CuMatrix(copy(rhs_pivot_corr_gpu))
