@@ -149,11 +149,14 @@ function test_cuda_construct_schur_synthetic(; sparse = false)
     temp = CUDA.CuMatrix(copy(B_gpu))
 
     LinearAlgebra.ldiv!(temp, LT_gpu, B_gpu)
+    # TODO: This can be done with less intermediate memory usage
     S_gpu .= A_gpu - B_gpu' * temp
+    display(S_gpu)
     return
 end
 
 @testset "basic-cuda" begin
     test_cuda_linearsolve_synthetic()
     test_cuda_construct_schur_synthetic()
+    test_cuda_construct_schur_synthetic(; sparse = true)
 end
