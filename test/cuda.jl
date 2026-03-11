@@ -159,7 +159,7 @@ function test_cuda_construct_schur_synthetic(; sparse = false)
     # We use the original B. The intermediate product's rows have
     # the inverse column permutation (of C) applied. So we apply the
     # forward column permutation to these rows.
-    BTCB_gpu = B_gpu' * temp[colorder, :]
+    BTCB_gpu = B_gpu' * temp[invperm(colorder), :]
     S_gpu .= A_gpu - BTCB_gpu
 
     if sparse
@@ -274,12 +274,14 @@ function test_cpu_construct_schur_synthetic()
     temp = LinearAlgebra.LowerTriangular(C_perm) \ B_perm
     temp_unperm = temp[invperm(colorder), :]
     BTCB = B' * temp_unperm
-    S = A - BTCB
+    S = A - LinearAlgebra.tril(BTCB)
 
     is_sym = LinearAlgebra.issymmetric(BTCB)
     println("CPU Schur symmetric: $is_sym")
     sym_error = abs.(BTCB - BTCB')
     println("CPU max(|S - S'|) = $(maximum(sym_error))")
+    avg_sym_error = sum(sym_error) / length(sym_error)
+    println("Avg CPU sym error = $(avg_sym_error)")
     return
 end
 
