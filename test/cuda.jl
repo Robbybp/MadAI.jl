@@ -271,6 +271,14 @@ function test_cpu_construct_schur_synthetic()
     @assert LinearAlgebra.istril(C_perm)
 
     B_perm = B[roworder, :]
+
+    # This alternative implementation yields no error. This seems to imply
+    # that the error is coming from the LowerTriangular backsolve
+    #pivot_solver = MadNLPHSL.Ma57Solver(C)
+    #MadNLP.factorize!(pivot_solver)
+    #temp = copy(B)
+    #MadNLP.solve!(pivot_solver, temp)
+    #BTCB = B' * temp
     temp = LinearAlgebra.LowerTriangular(C_perm) \ B_perm
     temp_unperm = temp[invperm(colorder), :]
     BTCB = B' * temp_unperm
