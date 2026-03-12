@@ -282,7 +282,7 @@ function test_cpu_construct_schur_synthetic()
     temp = LinearAlgebra.LowerTriangular(C_perm) \ B_perm
     temp_unperm = temp[invperm(colorder), :]
     BTCB = B' * temp_unperm
-    S = A - LinearAlgebra.tril(BTCB)
+    S = A - SparseArrays.sparse(LinearAlgebra.tril(BTCB))
 
     is_sym = LinearAlgebra.issymmetric(BTCB)
     println("CPU Schur symmetric: $is_sym")
@@ -290,6 +290,42 @@ function test_cpu_construct_schur_synthetic()
     println("CPU max(|S - S'|) = $(maximum(sym_error))")
     avg_sym_error = sum(sym_error) / length(sym_error)
     println("Avg CPU sym error = $(avg_sym_error)")
+
+    nrhs = 5
+    rhs = rand(N, nrhs)
+    rhs_reduced = rhs[R, :]
+    rhs_pivot = rhs[P, :]
+    rhs_pivot_perm = rhs_pivot[roworder, :]
+
+    Cinv_rhs_pivot = LinearAlgebra.LowerTriangular(C_perm) \ rhs_pivot_perm
+    Cinv_rhs_pivot = Cinv_rhs_pivot[invperm(colorder), :]
+    schur_rhs = rhs_reduced - B' * Cinv_rhs_pivot
+    schur_solver = MadNLPHSL.Ma57Solver(S)
+    MadNLP.factorize!(schur_solver)
+    x = copy(schur_rhs)
+    MadNLP.solve!(schur_solver, x)
+
+    rhs_pivot_corr = rhs_pivot_perm - B_perm * x
+    y_perm = LinearAlgebra.LowerTriangular(C_perm) \ rhs_pivot_corr
+    y = y_perm[invperm(colorder), :]
+
+    sol_schur = zeros(N, nrhs)
+    sol_schur[R, :] = x
+    sol_schur[P, :] = y
+
+    K_full = kkt_matrix + kkt_matrix' - LinearAlgebra.Diagonal(kkt_matrix)
+    residual = rhs - K_full * sol_schur
+    res_norm = LinearAlgebra.norm(residual, Inf)
+    println("CPU Schur residual (Inf): $res_norm")
+    @test res_norm <= 1e-6
+
+    ma57 = MadNLPHSL.Ma57Solver(kkt_matrix)
+    MadNLP.factorize!(ma57)
+    sol_ma57 = copy(rhs)
+    MadNLP.solve!(ma57, sol_ma57)
+    maxdiff = maximum(abs.(sol_schur - sol_ma57))
+    println("CPU Schur vs MA57 max error: $maxdiff")
+    @test maxdiff <= 1e-6
     return
 end
 
