@@ -241,6 +241,10 @@ function test_cuda_construct_schur_synthetic(; sparse = false)
     return
 end
 
+function _full(M)
+    return M + M' - LinearAlgebra.Diagonal(M)
+end
+
 function test_cpu_construct_schur_synthetic(; use_hsl = false)
     model, info = get_synthetic_nn_model()
     formulation = info.formulation
@@ -254,7 +258,6 @@ function test_cpu_construct_schur_synthetic(; use_hsl = false)
     MadNLP.initialize!(madnlp)
     kkt_system = madnlp.kkt
     kkt_matrix = MadNLP.get_kkt(kkt_system)
-    C = kkt_matrix[pivot_indices, pivot_indices]
     N = kkt_matrix.n
 
     index_set = Set(pivot_indices)
@@ -263,10 +266,11 @@ function test_cpu_construct_schur_synthetic(; use_hsl = false)
     R = reduced_indices
     A = kkt_matrix[R, R]
     B = kkt_matrix[P, R] + kkt_matrix[R, P]'
+    C = kkt_matrix[P, P]
+    # There is no reason to keep B sparse for now.
+    B = Matrix(B)
 
     if use_hsl
-        # This alternative implementation yields no error. This seems to imply
-        # that the error is coming from the LowerTriangular backsolve
         pivot_solver = MadNLPHSL.Ma57Solver(C)
         # TODO: HSL must have a triangular solve method I can use...
         MadNLP.factorize!(pivot_solver)
@@ -274,6 +278,11 @@ function test_cpu_construct_schur_synthetic(; use_hsl = false)
         println("Pivot (C) inertia: $pivot_inertia")
         temp = copy(B)
         MadNLP.solve!(pivot_solver, temp)
+        # This reduces error from about 1e-3 to 1-4.
+        MadAI.refine!(temp, pivot_solver, B; max_iter = 5)
+        temp_res = B - _full(C) * temp
+        temp_res_norm = LinearAlgebra.norm(temp_res, Inf)
+        println("C \\ B residual (Inf): $temp_res_norm")
         BTCB = B' * temp
     else
         # Creating the full pivot matrix and permuted B is only necessary
@@ -285,17 +294,20 @@ function test_cpu_construct_schur_synthetic(; use_hsl = false)
         @assert LinearAlgebra.istril(C_perm)
         B_perm = B[roworder, :]
         temp = LinearAlgebra.LowerTriangular(C_perm) \ B_perm
+        temp_res = B_perm - C_perm * temp
+        temp_res_norm = LinearAlgebra.norm(temp_res, Inf)
+        println("C_perm \\ B_perm residual (Inf): $temp_res_norm")
         temp_unperm = temp[invperm(colorder), :]
         BTCB = B' * temp_unperm
     end
+    # Should we use lower or upper triangle of BTCB? Or try to average them...?
+    #S = A - SparseArrays.sparse(0.5*(LinearAlgebra.tril(BTCB) + LinearAlgebra.triu(BTCB)'))
     S = A - SparseArrays.sparse(LinearAlgebra.tril(BTCB))
 
     is_sym = LinearAlgebra.issymmetric(BTCB)
     println("CPU Schur symmetric: $is_sym")
     sym_error = abs.(BTCB - BTCB')
     println("CPU max(|S - S'|) = $(maximum(sym_error))")
-    avg_sym_error = sum(sym_error) / length(sym_error)
-    println("Avg CPU sym error = $(avg_sym_error)")
 
     nrhs = 5
     rhs = rand(N, nrhs)
@@ -304,10 +316,17 @@ function test_cpu_construct_schur_synthetic(; use_hsl = false)
 
     if use_hsl
         Cinv_rhs_pivot = copy(rhs_pivot)
+        pivot_inertia_rhs = MadNLP.inertia(pivot_solver)
+        println("Pivot (C) inertia (rhs): $pivot_inertia_rhs")
         MadNLP.solve!(pivot_solver, Cinv_rhs_pivot)
+        MadAI.refine!(Cinv_rhs_pivot, pivot_solver, rhs_pivot; max_iter = 5)
+        Cinv_res = rhs_pivot - _full(C) * Cinv_rhs_pivot
+        println("C \\ rhs_pivot residual (Inf): $(LinearAlgebra.norm(Cinv_res, Inf))")
     else
         rhs_pivot_perm = rhs_pivot[roworder, :]
         Cinv_rhs_pivot = LinearAlgebra.LowerTriangular(C_perm) \ rhs_pivot_perm
+        Cinv_res = rhs_pivot_perm - C_perm * Cinv_rhs_pivot
+        println("C_perm \\ rhs_pivot_perm residual (Inf): $(LinearAlgebra.norm(Cinv_res, Inf))")
         Cinv_rhs_pivot = Cinv_rhs_pivot[invperm(colorder), :]
     end
     # Backsolving through the Schur complement is the same no matter what method
@@ -315,17 +334,28 @@ function test_cpu_construct_schur_synthetic(; use_hsl = false)
     schur_rhs = rhs_reduced - B' * Cinv_rhs_pivot
     schur_solver = MadNLPHSL.Ma57Solver(S)
     MadNLP.factorize!(schur_solver)
+    schur_inertia = MadNLP.inertia(schur_solver)
+    println("Schur (S) inertia: $schur_inertia")
     x = copy(schur_rhs)
     MadNLP.solve!(schur_solver, x)
+    MadAI.refine!(x, schur_solver, schur_rhs; max_iter = 5)
+    schur_res = schur_rhs - _full(S) * x
+    println("Schur solve residual (Inf): $(LinearAlgebra.norm(schur_res, Inf))")
 
     if use_hsl
         rhs_pivot_corr = rhs_pivot - B * x
         y = copy(rhs_pivot_corr)
         MadNLP.solve!(pivot_solver, y)
+        MadAI.refine!(y, pivot_solver, rhs_pivot_corr; max_iter = 5)
+        y_res = rhs_pivot_corr - _full(C) * y
+        println("C \\ rhs_pivot_corr residual (Inf): $(LinearAlgebra.norm(y_res, Inf))")
     else
         # B_perm has permuted rows, not columns. Multiplying by x is still valid
         rhs_pivot_corr = rhs_pivot_perm - B_perm * x
         y_perm = LinearAlgebra.LowerTriangular(C_perm) \ rhs_pivot_corr
+        y_res = rhs_pivot_corr - C_perm * y_perm
+        y_res_norm = LinearAlgebra.norm(y_res, Inf)
+        println("C_perm \\ rhs_pivot_corr residual (Inf): $y_res_norm")
         y = y_perm[invperm(colorder), :]
     end
 
@@ -337,7 +367,7 @@ function test_cpu_construct_schur_synthetic(; use_hsl = false)
     residual = rhs - K_full * sol_schur
     res_norm = LinearAlgebra.norm(residual, Inf)
     println("CPU Schur residual (Inf): $res_norm")
-    #@test res_norm <= 1e-6
+    @test res_norm <= 1.0
 
     ma57 = MadNLPHSL.Ma57Solver(kkt_matrix)
     MadNLP.factorize!(ma57)
@@ -345,14 +375,17 @@ function test_cpu_construct_schur_synthetic(; use_hsl = false)
     println("KKT inertia: $inertia")
     sol_ma57 = copy(rhs)
     MadNLP.solve!(ma57, sol_ma57)
+    res_ma57 = rhs - _full(kkt_matrix) * sol_ma57
+    println("MA57's residual: $(LinearAlgebra.norm(res_ma57, Inf))")
     maxdiff = maximum(abs.(sol_schur - sol_ma57))
     println("CPU Schur vs MA57 max error: $maxdiff")
-    #@test maxdiff <= 1e-6
+    @test maxdiff <= 1.0
     return
 end
 
 @testset "basic-cuda" begin
     #test_cuda_linearsolve_synthetic()
+    test_cpu_construct_schur_synthetic(; use_hsl = false)
     test_cpu_construct_schur_synthetic(; use_hsl = true)
     #test_cuda_construct_schur_synthetic()
     #test_cuda_construct_schur_synthetic(; sparse = true)
