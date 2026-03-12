@@ -653,9 +653,9 @@ function remove_diagonal_nonzeros(
 end
 
 function refine!(
-    sol::Vector{Float64},
+    sol::Array{Float64},
     solver::MadNLP.AbstractLinearSolver,
-    rhs::Vector{Float64};
+    rhs::Array{Float64};
     tol::Float64 = 1e-8,
     max_iter::Int = 10,
     full_matrix::Union{Nothing,SparseArrays.SparseMatrixCSC} = nothing,
