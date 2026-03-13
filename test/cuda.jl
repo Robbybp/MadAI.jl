@@ -99,7 +99,7 @@ function test_cuda_linearsolve_synthetic()
     return
 end
 
-function test_cuda_construct_schur_synthetic(; sparse = false)
+function test_cuda_schur_synthetic(; sparse = false)
     model, info = get_synthetic_nn_model()
     formulation = info.formulation
 
@@ -252,7 +252,7 @@ function _full(M)
     return M + M' - LinearAlgebra.Diagonal(M)
 end
 
-function test_cpu_construct_schur_synthetic(; use_hsl = false)
+function test_cpu_schur_synthetic(; use_hsl = false)
     model, info = get_synthetic_nn_model()
     formulation = info.formulation
 
@@ -392,8 +392,8 @@ end
 
 @testset "basic-cuda" begin
     #test_cuda_linearsolve_synthetic()
-    #test_cpu_construct_schur_synthetic(; use_hsl = false)
-    #test_cpu_construct_schur_synthetic(; use_hsl = true)
-    test_cuda_construct_schur_synthetic()
-    #test_cuda_construct_schur_synthetic(; sparse = true)
+    #test_cpu_schur_synthetic(; use_hsl = false)
+    #test_cpu_schur_synthetic(; use_hsl = true)
+    test_cuda_schur_synthetic()
+    #test_cuda_schur_synthetic(; sparse = true)
 end
