@@ -430,11 +430,11 @@ function test_cuda_cpu_schur()
     C_gpu = CuSparseMatrixCSR(C_perm)
     LT_gpu = LinearAlgebra.LowerTriangular(C_gpu)
     # Convert sparse-CPU to dense-GPU
-    B_gpu = CUDA.CuMatrix(B)
+    B_gpu = CUDA.CuMatrix(Matrix(B))
     B_gpu_perm = B_gpu[roworder, :]
     CinvB_gpu = copy(B_gpu_perm)
 
-    LinearAlgebra.ldiv!(LT_gpu, CinvB_gpu)
+    LinearAlgebra.ldiv!(CinvB_gpu, LT_gpu, CinvB_gpu)
     BtCinvB_gpu = B_gpu' * CinvB_gpu[invperm(colorder), :]
     BtCinvB_cpu = SparseArrays.sparse(LinearAlgebra.tril(Matrix(BtCinvB_gpu)))
     # TODO: I could do this subtraction on the GPU if I allocated a sparse matrix
@@ -452,20 +452,26 @@ function test_cuda_cpu_schur()
 
     schur_solver = MadNLPHSL.Ma57Solver(S)
     MadNLP.factorize!(schur_solver)
+    S_inertia = MadNLP.inertia(schur_solver)
+    println("S inertia = $S_inertia")
 
     # It is not clear if we can get any benefit from GPU-accelerated backsolve
     # given the amount of data transfer we need to do...
-    Cinv_rC = copy(rhs_C_gpu)
+    Cinv_rC = rhs_C_gpu[roworder, :]
     LinearAlgebra.ldiv!(LT_gpu, Cinv_rC)
     Cinv_rC .= Cinv_rC[invperm(colorder), :]
     rhs_S_gpu = rhs_A_gpu .- B_gpu' * Cinv_rC
     rhs_S_cpu = Matrix(rhs_S_gpu)
 
     sol = zeros(N, nrhs)
-    sol_A_cpu = copy(rhs_A_cpu)
+    sol_A_cpu = copy(rhs_S_cpu)
     MadNLP.solve!(schur_solver, sol_A_cpu)
+    #MadAI.refine!(sol_A_cpu, schur_solver, rhs_S_cpu; max_iter = 5)
+    S_res = rhs_S_cpu - _full(S) * sol_A_cpu
+    println("Schur complement residual (Inf): $(LinearAlgebra.norm(S_res, Inf))")
+    sol_A_gpu = CUDA.CuMatrix(sol_A_cpu)
 
-    rhs_C_gpu .-= B_gpu * rhs_A_gpu
+    rhs_C_gpu .-= B_gpu * sol_A_gpu
     rhs_C_perm_gpu = rhs_C_gpu[roworder, :]
     sol_C_gpu = copy(rhs_C_perm_gpu)
     LinearAlgebra.ldiv!(LT_gpu, sol_C_gpu)
