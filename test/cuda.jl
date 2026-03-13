@@ -390,10 +390,102 @@ function test_cpu_schur_synthetic(; use_hsl = false)
     return
 end
 
+"""
+CUDA for triangular backsolve; CPU for the Schur complement
+"""
+function test_cuda_cpu_schur()
+    model, info = get_synthetic_nn_model()
+    formulation = info.formulation
+
+    pivot_vars, pivot_cons = MadAI.get_vars_cons(formulation)
+    pivot_indices = MadAI.get_kkt_indices(model, pivot_vars, pivot_cons)
+    pivot_indices = convert(Vector{Int32}, pivot_indices)
+
+    nlp = NLPModelsJuMP.MathOptNLPModel(model)
+    madnlp = MadNLP.MadNLPSolver(nlp)
+    MadNLP.initialize!(madnlp)
+    kkt_system = madnlp.kkt
+    kkt_matrix = MadNLP.get_kkt(kkt_system)
+    C = kkt_matrix[pivot_indices, pivot_indices]
+    N = kkt_matrix.n
+    pivot_dim = C.n
+    schur_dim = kkt_matrix.n - pivot_dim
+
+    index_set = Set(pivot_indices)
+    reduced_indices = filter(i -> !(i in index_set), 1:N)
+    # I don't need the RHS to construct the Schur complement, but it might be nice
+    # to test the full solve here, in which case I will need it.
+    #orig_rhs_reduced = rhs[reduced_indices]
+    #orig_rhs_pivot = rhs[pivot_indices]
+    P = pivot_indices
+    R = reduced_indices
+    A = kkt_matrix[R, R]
+    B = kkt_matrix[P, R] + kkt_matrix[R, P]'
+
+    C_full = C + C' - LinearAlgebra.Diagonal(C)
+    roworder, colorder = _get_pivot_lowertri_order(C_full)
+    C_perm = C[roworder, colorder]
+    @assert LinearAlgebra.istril(C_perm)
+
+    C_gpu = CuSparseMatrixCSR(C_perm)
+    LT_gpu = LinearAlgebra.LowerTriangular(C_gpu)
+    # Convert sparse-CPU to dense-GPU
+    B_gpu = CUDA.CuMatrix(B)
+    B_gpu_perm = B_gpu[roworder, :]
+    CinvB_gpu = copy(B_gpu_perm)
+
+    LinearAlgebra.ldiv!(LT_gpu, CinvB_gpu)
+    BtCinvB_gpu = B_gpu' * CinvB_gpu[invperm(colorder), :]
+    BtCinvB_cpu = SparseArrays.sparse(LinearAlgebra.tril(Matrix(BtCinvB_gpu)))
+    # TODO: I could do this subtraction on the GPU if I allocated a sparse matrix
+    # with the right nonzero pattern.
+    S = A - BtCinvB_cpu
+
+    nrhs = 5
+    Random.seed!(101)
+    rhs = rand(N, nrhs)
+
+    rhs_A_cpu = rhs[R, :]
+    rhs_C_cpu = rhs[P, :]
+    rhs_A_gpu = CUDA.CuMatrix(rhs_A_cpu)
+    rhs_C_gpu = CUDA.CuMatrix(rhs_C_cpu)
+
+    schur_solver = MadNLPHSL.Ma57Solver(S)
+    MadNLP.factorize!(schur_solver)
+
+    # It is not clear if we can get any benefit from GPU-accelerated backsolve
+    # given the amount of data transfer we need to do...
+    Cinv_rC = copy(rhs_C_gpu)
+    LinearAlgebra.ldiv!(LT_gpu, Cinv_rC)
+    Cinv_rC .= Cinv_rC[invperm(colorder), :]
+    rhs_S_gpu = rhs_A_gpu .- B_gpu' * Cinv_rC
+    rhs_S_cpu = Matrix(rhs_S_gpu)
+
+    sol = zeros(N, nrhs)
+    sol_A_cpu = copy(rhs_A_cpu)
+    MadNLP.solve!(schur_solver, sol_A_cpu)
+
+    rhs_C_gpu .-= B_gpu * rhs_A_gpu
+    rhs_C_perm_gpu = rhs_C_gpu[roworder, :]
+    sol_C_gpu = copy(rhs_C_perm_gpu)
+    LinearAlgebra.ldiv!(LT_gpu, sol_C_gpu)
+    sol_C_gpu .= sol_C_gpu[invperm(colorder), :]
+    sol_C_cpu = Matrix(sol_C_gpu)
+
+    sol[R, :] .= sol_A_cpu
+    sol[P, :] .= sol_C_cpu
+
+    residual = rhs .- _full(kkt_matrix) * sol
+    res_norm = LinearAlgebra.norm(residual, Inf)
+    println("CPU Schur residual (Inf): $res_norm")
+    @test res_norm <= 1.0
+end
+
 @testset "basic-cuda" begin
     #test_cuda_linearsolve_synthetic()
     #test_cpu_schur_synthetic(; use_hsl = false)
     #test_cpu_schur_synthetic(; use_hsl = true)
-    test_cuda_schur_synthetic()
+    #test_cuda_schur_synthetic()
     #test_cuda_schur_synthetic(; sparse = true)
+    test_cuda_cpu_schur()
 end
