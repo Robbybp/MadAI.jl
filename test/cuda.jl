@@ -426,7 +426,7 @@ function test_cuda_cpu_schur()
 
     C_full = C + C' - LinearAlgebra.Diagonal(C)
     roworder, colorder = _get_pivot_lowertri_order(C_full)
-    C_perm = C[roworder, colorder]
+    C_perm = C_full[roworder, colorder]
     @assert LinearAlgebra.istril(C_perm)
 
     C_gpu = CuSparseMatrixCSR(C_perm)
@@ -468,7 +468,7 @@ function test_cuda_cpu_schur()
     sol = zeros(N, nrhs)
     sol_A_cpu = copy(rhs_S_cpu)
     MadNLP.solve!(schur_solver, sol_A_cpu)
-    #MadAI.refine!(sol_A_cpu, schur_solver, rhs_S_cpu; max_iter = 5)
+    MadAI.refine!(sol_A_cpu, schur_solver, rhs_S_cpu; max_iter = 5)
     S_res = rhs_S_cpu - _full(S) * sol_A_cpu
     println("Schur complement residual (Inf): $(LinearAlgebra.norm(S_res, Inf))")
     sol_A_gpu = CUDA.CuMatrix(sol_A_cpu)
@@ -493,7 +493,7 @@ end
     #test_cuda_linearsolve_synthetic()
     #test_cpu_schur_synthetic(; use_hsl = false)
     #test_cpu_schur_synthetic(; use_hsl = true)
-    test_cuda_schur_synthetic()
+    #test_cuda_schur_synthetic()
     #test_cuda_schur_synthetic(; sparse = true)
-    #test_cuda_cpu_schur()
+    test_cuda_cpu_schur()
 end
