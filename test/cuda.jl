@@ -215,6 +215,12 @@ function test_cuda_schur_synthetic(; sparse = false)
         F_gpu, ipiv_gpu, _ = CUSOLVER.sytrf!('L', S_gpu)
         ipiv_gpu = CUDA.CuVector{Int64}(ipiv_gpu)
         CUSOLVER.sytrs!('L', F_gpu, ipiv_gpu, x_gpu)
+        eig_gpu = CUSOLVER.Xsyevd!('N', 'L', S_gpu)
+        eig_cpu = Vector(eig_gpu)
+        npos = count(>(0.0), eig_cpu)
+        nzero = count(==(0.0), eig_cpu)
+        nneg = count(<(0.0), eig_cpu)
+        println("Schur complement inertia: $((npos, nzero, nneg))")
 
         # LU
         #F_gpu, ipiv_gpu, _ = CUSOLVER.Xgetrf!(S_gpu)
@@ -413,10 +419,6 @@ function test_cuda_cpu_schur()
 
     index_set = Set(pivot_indices)
     reduced_indices = filter(i -> !(i in index_set), 1:N)
-    # I don't need the RHS to construct the Schur complement, but it might be nice
-    # to test the full solve here, in which case I will need it.
-    #orig_rhs_reduced = rhs[reduced_indices]
-    #orig_rhs_pivot = rhs[pivot_indices]
     P = pivot_indices
     R = reduced_indices
     A = kkt_matrix[R, R]
@@ -491,7 +493,7 @@ end
     #test_cuda_linearsolve_synthetic()
     #test_cpu_schur_synthetic(; use_hsl = false)
     #test_cpu_schur_synthetic(; use_hsl = true)
-    #test_cuda_schur_synthetic()
+    test_cuda_schur_synthetic()
     #test_cuda_schur_synthetic(; sparse = true)
-    test_cuda_cpu_schur()
+    #test_cuda_cpu_schur()
 end
