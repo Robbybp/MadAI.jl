@@ -38,6 +38,10 @@ function _get_pivot_lowertri_order(matrix)
     return rp, cp
 end
 
+"""Here, we only test the factorization and backsolve of the pivot matrix.
+This test is superseded by the tests below which test the full Schur
+complement algorithm.
+"""
 function test_cuda_linearsolve_synthetic()
     model, info = get_synthetic_nn_model()
     formulation = info.formulation
@@ -99,6 +103,10 @@ function test_cuda_linearsolve_synthetic()
     return
 end
 
+"""Here we test the construction of the Schur complement and the solve
+of the resulting linear system. This only works with `sparse=false`.
+We compare against using MA57 for the original KKT system.
+"""
 function test_cuda_schur_synthetic(; sparse = false)
     model, info = get_synthetic_nn_model()
     formulation = info.formulation
@@ -258,6 +266,9 @@ function _full(M)
     return M + M' - LinearAlgebra.Diagonal(M)
 end
 
+"""CPU-only implementation of the Schur complement algorithm.
+Tested against MA57 on the original KKT matrix.
+"""
 function test_cpu_schur_synthetic(; use_hsl = false)
     model, info = get_synthetic_nn_model()
     formulation = info.formulation
