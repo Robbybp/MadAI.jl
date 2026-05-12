@@ -87,6 +87,10 @@ function BlockTriangularSolver(
         # TODO: block_triangularize method that accepts CSC
         igraph = MathProgIncidence.IncidenceGraphInterface(full_matrix)
         blocks = MathProgIncidence.block_triangularize(igraph)
+        # We convert to cover MathProgIncidence's updated return type for
+        # block_triangularize. We use b[1] and b[2] instead of, e.g., b.con
+        # in case an old version is being used.
+        blocks = map(b -> (convert(Vector{Int}, b[1]), convert(Vector{Int}, b[2])), blocks)
         block_diagonalize = false
     else
         # If blocks were provided, we need to make sure they partition the row/column indices
