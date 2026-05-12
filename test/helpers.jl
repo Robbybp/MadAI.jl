@@ -149,4 +149,97 @@ function _test_solve_kkt(
     )
 end
 
+"""An end-to-end test using the JuMP interface"""
+function _test_solve_with_jump(
+    model::JuMP.Model,
+    LinearSolver::Type{<:MadNLP.AbstractLinearSolver},
+)
+    optimizer = JuMP.optimizer_with_attributes(
+        MadNLP.Optimizer,
+        "linear_solver" => LinearSolver,
+        "tol" => 1e-6,
+        "print_level" => MadNLP.ERROR,
+    )
+    JuMP.set_optimizer(model, optimizer)
+    JuMP.optimize!(model)
+    return
+end
+
+"""An end-to-end test using the JuMP interface
+With SchurComplementSolver, we accept the model's info NamedTuple and compute
+the pivot indices.
+"""
+function _test_solve_with_jump(
+    model::JuMP.Model,
+    info::NamedTuple,
+    LinearSolver::Type{MadAI.SchurComplementSolver},
+)
+    pivot_indices = MadAI.get_kkt_indices(model, info.variables, info.constraints)
+    pivot_indices = convert(Vector{Int32}, pivot_indices)
+    optimizer = JuMP.optimizer_with_attributes(
+        MadNLP.Optimizer,
+        "linear_solver" => LinearSolver,
+        "tol" => 1e-6,
+        "print_level" => MadNLP.ERROR,
+        # Recall that MadNLP parses these options and sends appropriate ones to the
+        # linear solver
+        "pivot_indices" => pivot_indices,
+    )
+    JuMP.set_optimizer(model, optimizer)
+    JuMP.optimize!(model)
+    return
+end
+
+"""An end-to-end test using the JuMP interface
+With SchurComplementSolver and BlockTriangularSolver
+"""
+function _test_solve_with_jump(
+    model::JuMP.Model,
+    info::NamedTuple,
+    LinearSolver::Type{MadAI.SchurComplementSolver},
+    PivotSolver::Type{MadAI.BlockTriangularSolver},
+)
+    pivot_indices = MadAI.get_kkt_indices(model, info.variables, info.constraints)
+    pivot_indices = convert(Vector{Int32}, pivot_indices)
+    optimizer = JuMP.optimizer_with_attributes(
+        MadNLP.Optimizer,
+        "linear_solver" => LinearSolver,
+        "tol" => 1e-6,
+        "print_level" => MadNLP.ERROR,
+        "pivot_indices" => pivot_indices,
+        "PivotSolver" => PivotSolver,
+    )
+    JuMP.set_optimizer(model, optimizer)
+    JuMP.optimize!(model)
+    return
+end
+
+"""An end-to-end test using the JuMP interface
+With SchurComplementSolver and BlockTriangularSolver
+"""
+function _test_solve_with_jump(
+    model::JuMP.Model,
+    info::NamedTuple,
+    formulation::MathOptAI.AbstractFormulation,
+    LinearSolver::Type{MadAI.SchurComplementSolver},
+    PivotSolver::Type{MadAI.BlockTriangularSolver},
+)
+    pivot_indices = MadAI.get_kkt_indices(model, info.variables, info.constraints)
+    pivot_indices = convert(Vector{Int32}, pivot_indices)
+    blocks = MadAI.partition_indices_by_layer(model, formulation; indices = pivot_indices)
+    pivot_solver_opt = MadAI.BlockTriangularOptions(; blocks)
+    optimizer = JuMP.optimizer_with_attributes(
+        MadNLP.Optimizer,
+        "linear_solver" => LinearSolver,
+        "tol" => 1e-6,
+        "print_level" => MadNLP.ERROR,
+        "pivot_indices" => pivot_indices,
+        "PivotSolver" => PivotSolver,
+        "pivot_solver_opt" => pivot_solver_opt,
+    )
+    JuMP.set_optimizer(model, optimizer)
+    JuMP.optimize!(model)
+    return
+end
+
 #end
