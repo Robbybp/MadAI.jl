@@ -18,5 +18,6 @@ include("formulation.jl")
 include("nlpmodels.jl")
 include("kkt-partition.jl")
 include("ma48.jl")
+include("gpu-schur.jl")
 
 end
