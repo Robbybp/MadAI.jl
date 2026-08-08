@@ -18,8 +18,33 @@ ACTIVATION_LOOKUP = {
 }
 
 
-def _get_fname(args):
-    return f"mnist-{args.activation}{args.nodes}nodes{args.layers}layers.pt"
+def _get_fname(nodes, layers, activation):
+    return f"mnist-{activation}{nodes}nodes{layers}layers.pt"
+
+
+def create_nn_architecture(nodes, layers, activation, softmax=True, load_weights=True):
+    """Create an MLP with the requested hidden-layer configuration. By default,
+    the network is set up for inference, with the Softmax layer appended and
+    weights loaded from the default location.
+    """
+    # TODO: Move hardcoded dimensions
+    input_dim = 28 * 28
+    output_dim = 10
+    activation_function = ACTIVATION_LOOKUP[activation]
+    network_layers = [torch.nn.Linear(input_dim, nodes)]
+    for _ in range(layers):
+        network_layers.append(activation_function())
+        network_layers.append(torch.nn.Linear(nodes, nodes))
+    network_layers.append(activation_function())
+    network_layers.append(torch.nn.Linear(nodes, output_dim))
+    if softmax:
+        network_layers.append(torch.nn.Softmax(dim=-1))
+    nn = torch.nn.Sequential(*network_layers)
+    if load_weights:
+        weightfile = os.path.join(WEIGHTSDIR, _get_fname(nodes, layers, activation))
+        weights = torch.load(weightfile)
+        nn.load_state_dict(weights)
+    return nn
 
 
 def predict(nn, x):
@@ -65,29 +90,15 @@ def main(args):
 
     _, image_height, image_width = train_dataset.data.shape
     input_dim = image_height * image_width
-    hidden_dim = args.nodes
-    n_hidden = args.layers
+    # The outputs are raw logits; softmax is omitted for cross-entropy training.
+    nn = create_nn_architecture(
+        args.nodes,
+        args.layers,
+        args.activation,
+        softmax=False,
+        load_weights=False,
+    )
     output_dim = 10
-    activation_function = ACTIVATION_LOOKUP[args.activation]
-
-    # Implement architecture of NN:
-    # - Affine layer mapping input dimension to hidden dimension
-    # - n layers of: activation function followed by hidden-by-hidden affine layer
-    # - activation layer
-    # - hidden-by-output affine layer
-    # - softmax
-    # So, "4 layers" => 4 hidden-by-hidden affine layers, which means 5 activation
-    # function layers of the hidden dimension.
-    layers = [torch.nn.Linear(input_dim, hidden_dim)]
-    for i in range(n_hidden):
-        layers.append(activation_function())
-        layers.append(torch.nn.Linear(hidden_dim, hidden_dim))
-    layers.append(activation_function())
-    layers.append(torch.nn.Linear(hidden_dim, output_dim))
-    # We will apply softmax later, as it is easier to apply a "cross-entropy loss"
-    # if we leave it out.
-    # The outputs of this NN are "raw logits" (scores)
-    nn = torch.nn.Sequential(*layers)
 
     # Example prediction
     if False:
@@ -129,7 +140,10 @@ def main(args):
     t_train = time.time() - t_train_start
     print(f"Time spent training: {t_train:1.2f}")
 
-    likelihood_predictor = torch.nn.Sequential(nn, torch.nn.Softmax(dim=0))
+    # Note that this method of appending Softmax has to match how we append
+    # softmax in construct_nn_architecture (whether the original NN is flattened
+    # or nested.
+    likelihood_predictor = torch.nn.Sequential(*nn.children(), torch.nn.Softmax(dim=-1))
     acc = evaluate_accuracy(nn, train_dataset, device=args.device)
     ntrain = len(train_dataset)
     print(f"Accuracy on training set of {ntrain} samples: {acc}")
@@ -148,14 +162,14 @@ def main(args):
     # Send model back to CPU
     nn.to("cpu")
 
-    fname = _get_fname(args)
+    fname = _get_fname(args.nodes, args.layers, args.activation)
     fpath = os.path.join(WEIGHTSDIR, fname)
     weights = likelihood_predictor.state_dict()
     if args.dry_run:
         print(f"--dry-run set. Not saving. Would have saved weights to {fpath}")
     else:
         print(f"Saving weights to {fpath}")
-        torch.save(state, fpath)
+        torch.save(weights, fpath)
 
 
 if __name__ == "__main__":
