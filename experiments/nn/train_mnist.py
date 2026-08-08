@@ -176,7 +176,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--nodes", default=128, type=int, help="Nodes per layer. (default=128)")
     parser.add_argument("--layers", default=4, type=int, help="Number of layers. (default=4)")
-    parser.add_argument("--activation", default="relu", help=f"Activation function. (default=relu. options={list(ACTIVATION_LOOKUP)})")
+    parser.add_argument("--activation", default="tanh", help=f"Activation function. (default=tanh. options={list(ACTIVATION_LOOKUP)})")
     parser.add_argument("--dry-run", action="store_true", help="Don't save trained network")
     parser.add_argument("--device", default="cpu", help="default='cpu'")
     parser.add_argument("--epochs", type=int, default=10, help="default=10")
