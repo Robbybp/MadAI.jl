@@ -1,3 +1,5 @@
+import PythonCall
+torch = PythonCall.pyimport("torch")
 module MNIST
 include("mnist.jl")
 end
