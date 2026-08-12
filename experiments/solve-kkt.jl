@@ -30,13 +30,42 @@ madnlp = MadNLP.MadNLPSolver(nlp)
 
 MadNLP.initialize!(madnlp)
 
+# TODO: Some method like this should really be part of NLPModelsJuMP
+variables, constraints = MadAI.get_var_con_order(model)
+
+# I think I prefer the implementation below
+#function _get_vectors(iterate)
+#    # Map variables to the value specified
+#    x = map(var -> iterate["primal"][JuMP.name(var)], variables)
+#    y = map(con -> iterate["dual"][JuMP.name(con)], constraints)
+#    zL = map(var -> iterate["Ldual"][JuMP.name(var)], variables)
+#    zU = map(var -> iterate["Udual"][JuMP.name(var)], variables)
+#    return (; x, y, zL, zU)
+#end
+
+# Alternatively:
+nlp_varnames = JuMP.name.(variables)
+nlp_connames = JuMP.name.(constraints)
+primal_order = indexin(iterate_varnames, nlp_varnames)
+dual_order = indexin(iterate_connames, nlp_connames)
+function _get_vectors(iterate)
+    x = iterate["primal"][primal_order]
+    y = iterate["dual"][dual_order]
+    zL = iterate["Ldual"][primal_order]
+    zU = iterate["Udual"][primal_order]
+    return (; x, y, zL, zU)
+end
+
 for iterate in iterates
+    x, y, zL, zU = _get_vectors(iterate)
+    μ = iterate["barrier"]
+
     # TODO: Make sure this is right
     # Values must use MadNLP's *reformulated* ordering.
     MadNLP.full(MadNLP.get_x(madnlp)) .= x
     MadNLP.get_y(madnlp) .= y
-    MadNLP.get_zl_r(madnlp) .= zl
-    MadNLP.get_zu_r(madnlp) .= zu
+    MadNLP.get_zl_r(madnlp) .= zL
+    MadNLP.get_zu_r(madnlp) .= zU
     MadNLP.set_mu!(madnlp, μ)
 
     # Re-evaluate quantities that depend on x and y.
