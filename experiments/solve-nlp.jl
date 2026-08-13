@@ -56,7 +56,7 @@ struct Callback <: MadNLP.AbstractUserCallback
 end
 
 function (cb::Callback)(solver::MadNLP.AbstractMadNLPSolver, mode)
-    status isa MadNLP.UserCallbackRegular || return true
+    mode isa MadNLP.UserCallbackRegular || return true
     push!(cb.iterates, Dict{String,Any}(
         "primal" => copy(MadNLP.primal(MadNLP.get_x(solver))),
         "dual" => copy(MadNLP.get_y(solver)),
