@@ -2,6 +2,7 @@ import ArgParse
 import JuMP
 import HSL_jll
 import Ipopt
+import MadAI
 import MadNLP
 import MadNLPHSL
 import PythonCall
@@ -49,6 +50,45 @@ function get_optimizer(solver, linear_solver)
     )
 end
 
+struct Callback <: MadNLP.AbstractUserCallback
+    iterates::Vector{Any}
+    Callback() = new([])
+end
+
+function (cb::Callback)(solver::MadNLP.AbstractMadNLPSolver, mode)
+    status isa MadNLP.UserCallbackRegular || return true
+    push!(cb.iterates, Dict{String,Any}(
+        "primal" => copy(MadNLP.primal(MadNLP.get_x(solver))),
+        "dual" => copy(MadNLP.get_y(solver)),
+        "Ldual" => copy(MadNLP.primal(MadNLP.get_zl(solver))),
+        "Udual" => copy(MadNLP.primal(MadNLP.get_zu(solver))),
+        "barrier" => MadNLP.get_mu(solver),
+    ))
+    return true
+end
+
+#function madnlp_iterate_callback(model)
+#    variables, constraints = MadAI.get_var_con_order(model)
+#    iterates = Dict{String,Any}(
+#        "variables" => JuMP.name.(variables),
+#        "constraints" => JuMP.name.(constraints),
+#        "iterates" => Any[],
+#    )
+#
+#    function MyCallback(solver, status)
+#        status isa MadNLP.UserCallbackRegular || return true
+#        push!(iterates["iterates"], Dict{String,Any}(
+#            "primal" => copy(MadNLP.primal(MadNLP.get_x(solver))),
+#            "dual" => copy(MadNLP.get_y(solver)),
+#            "Ldual" => copy(MadNLP.primal(MadNLP.get_zl(solver))),
+#            "Udual" => copy(MadNLP.primal(MadNLP.get_zu(solver))),
+#            "barrier" => MadNLP.get_mu(solver),
+#        ))
+#        return true
+#    end
+#    return iterates, MyCallback
+#end
+
 # TODO: Expose these in CLI
 modelname = "mnist"
 nodes = 128
@@ -58,4 +98,8 @@ args = parse_commandline()
 model, formulation = get_model(modelname, nodes, layers)
 
 JuMP.set_optimizer(model, get_optimizer(args["solver"], args["linear-solver"]))
+if args["solver"] == "madnlp"
+    cb = Callback()
+    JuMP.set_optimizer_attribute(model, "intermediate_callback", cb)
+end
 JuMP.optimize!(model)
