@@ -33,6 +33,14 @@ function parse_commandline()
         "--linear-solver"
             help = "HSL linear solver: ma27, ma57, or ma86"
             default = "ma57"
+        "--write-iterates"
+            help = "Number of iterates to write. Default, 0, writes nothing."
+            arg_type = Int
+            default = 0
+        "--last-iterates"
+            help = "Write the last N iterates. Default is to write the first N."
+            action = :store_true
+            default = false
     end
     args = ArgParse.parse_args(settings)
     args["solver"] = lowercase(args["solver"])
@@ -116,11 +124,22 @@ end
 JuMP.optimize!(model)
 
 # Collect iterates from callback
-if args["solver"] == "madnlp"
+if args["write-iterates"] >= 1 && args["solver"] == "madnlp"
+    n_iter = args["write-iterates"]
+    if n_iter < length(cp.iterates)
+        error("$n_iter iterates requested, but solve only had $(length(cp.iterates)) iterations")
+    end
+
+    if args["last-iterates"]
+        iter_start = length(cp.iterates) - n_iter
+        iterates_to_write = cp.iterates[iter_start:end]
+    else
+        iterates_to_write = cp.iterates[1:n_iter]
+    end
     variables, constraints = MadAI.get_var_con_order(model)
-    iterates = Dict{String,Any}(
+    iterate_data = Dict{String,Any}(
         "variables" => JuMP.name.(variables),
         "constraints" => JuMP.name.(constraints),
-        "iterates" => cp.iterates,
+        "iterates" => iterates_to_write,
     )
 end
