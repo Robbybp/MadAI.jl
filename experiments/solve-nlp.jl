@@ -1,4 +1,5 @@
 import ArgParse
+import JSON
 import JuMP
 import HSL_jll
 import Ipopt
@@ -113,7 +114,7 @@ args = parse_commandline()
 model, formulation = get_model(modelname, nodes, layers)
 
 JuMP.set_optimizer(model, OPTIMIZER_LOOKUP[args["solver"]])
-JuMP.set_optimizer_attribute(model, LINEAR_SOLVER_LOOKUP[args["solver"], args["linear-solver"]])
+JuMP.set_optimizer_attribute(model, "linear_solver", LINEAR_SOLVER_LOOKUP[args["solver"], args["linear-solver"]])
 # TODO: Linear solver options
 
 if args["solver"] == "madnlp"
@@ -126,16 +127,16 @@ JuMP.optimize!(model)
 # Collect iterates from callback
 if args["write-iterates"] >= 1 && args["solver"] == "madnlp"
     n_iter = args["write-iterates"]
-    if n_iter < length(cp.iterates)
-        error("$n_iter iterates requested, but solve only had $(length(cp.iterates)) iterations")
+    if n_iter > length(cb.iterates)
+        error("$n_iter iterates requested, but solve only had $(length(cb.iterates)) iterations")
     end
 
     if args["last-iterates"]
-        iter_start = length(cp.iterates) - n_iter
-        iterates_to_write = cp.iterates[iter_start:end]
+        iter_start = length(cb.iterates) - n_iter
+        iterates_to_write = cb.iterates[iter_start:end]
         suffix = "-last"
     else
-        iterates_to_write = cp.iterates[1:n_iter]
+        iterates_to_write = cb.iterates[1:n_iter]
         suffix = "-first"
     end
     variables, constraints = MadAI.get_var_con_order(model)
@@ -146,4 +147,8 @@ if args["write-iterates"] >= 1 && args["solver"] == "madnlp"
     )
     fname = "$modelname-$(nodes)nodes$(layers)layers$(suffix).json"
     fpath = joinpath(@__DIR__, "data", "iterates", fname)
+    mkpath(dirname(fpath))
+    open(fpath, "w") do io
+        JSON.print(io, iterate_data, 1)
+    end
 end
