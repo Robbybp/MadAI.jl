@@ -10,10 +10,18 @@ import PythonCall
 include("nn/nn.jl")
 include("JuMP/models.jl")
 
-const MADNLP_LINEAR_SOLVERS = Dict(
-    "ma27" => MadNLPHSL.Ma27Solver,
-    "ma57" => MadNLPHSL.Ma57Solver,
-    "ma86" => MadNLPHSL.Ma86Solver,
+# TODO: Custom Schur complement solver?
+const LINEAR_SOLVER_LOOKUP = Dict(
+    ("madnlp", "ma27") => MadNLPHSL.Ma27Solver,
+    ("madnlp", "ma57") => MadNLPHSL.Ma57Solver,
+    ("madnlp", "ma86") => MadNLPHSL.Ma86Solver,
+    ("ipopt", "ma27") => "ma27",
+    ("ipopt", "ma57") => "ma57",
+    ("ipopt", "ma86") => "ma86",
+)
+const OPTIMIZER_LOOKUP = Dict(
+    "ipopt" => Ipopt.Optimizer,
+    "madnlp" => MadNLP.Optimizer,
 )
 
 function parse_commandline()
@@ -56,7 +64,6 @@ struct Callback <: MadNLP.AbstractUserCallback
 end
 
 function (cb::Callback)(solver::MadNLP.AbstractMadNLPSolver, mode)
-    mode isa MadNLP.UserCallbackRegular || return true
     push!(cb.iterates, Dict{String,Any}(
         "primal" => copy(MadNLP.primal(MadNLP.get_x(solver))),
         "dual" => copy(MadNLP.get_y(solver)),
@@ -97,9 +104,23 @@ layers = 4
 args = parse_commandline()
 model, formulation = get_model(modelname, nodes, layers)
 
-JuMP.set_optimizer(model, get_optimizer(args["solver"], args["linear-solver"]))
+JuMP.set_optimizer(model, OPTIMIZER_LOOKUP[args["solver"]])
+JuMP.set_optimizer_attribute(model, LINEAR_SOLVER_LOOKUP[args["solver"], args["linear-solver"]])
+# TODO: Linear solver options
+
 if args["solver"] == "madnlp"
     cb = Callback()
     JuMP.set_optimizer_attribute(model, "intermediate_callback", cb)
 end
+
 JuMP.optimize!(model)
+
+# Collect iterates from callback
+if args["solver"] == "madnlp"
+    variables, constraints = MadAI.get_var_con_order(model)
+    iterates = Dict{String,Any}(
+        "variables" => JuMP.name.(variables),
+        "constraints" => JuMP.name.(constraints),
+        "iterates" => cp.iterates,
+    )
+end
