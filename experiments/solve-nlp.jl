@@ -133,8 +133,10 @@ if args["write-iterates"] >= 1 && args["solver"] == "madnlp"
     if args["last-iterates"]
         iter_start = length(cp.iterates) - n_iter
         iterates_to_write = cp.iterates[iter_start:end]
+        suffix = "-last"
     else
         iterates_to_write = cp.iterates[1:n_iter]
+        suffix = "-first"
     end
     variables, constraints = MadAI.get_var_con_order(model)
     iterate_data = Dict{String,Any}(
@@ -142,4 +144,6 @@ if args["write-iterates"] >= 1 && args["solver"] == "madnlp"
         "constraints" => JuMP.name.(constraints),
         "iterates" => iterates_to_write,
     )
+    fname = "$modelname-$(nodes)nodes$(layers)layers$(suffix).json"
+    fpath = joinpath(@__DIR__, "data", "iterates", fname)
 end
