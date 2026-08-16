@@ -6,6 +6,10 @@ import MadNLP
 import MadNLPHSL
 import MadAI
 
+function MadNLP.solve!(solver::MadNLP.AbstractLinearSolver, rhs::Vector)
+    return MadNLP.solve_linear_system!(solver, rhs)
+end
+
 include("JuMP/models.jl")
 
 modelname = "mnist"
@@ -19,8 +23,24 @@ iterate_data = open(fpath, "r") do io
     return JSON.parse(io)
 end
 
-LinearSolver = MadNLPHSL.Ma57Solver
-opt = MadNLP.default_options(LinearSolver)
+USE_MA57 = false
+if USE_MA57
+    LinearSolver = MadNLPHSL.Ma57Solver
+    opt = MadNLP.default_options(LinearSolver)
+else
+    LinearSolver = MadAI.SchurComplementSolver
+    pivot_vars, pivot_cons = MadAI.get_vars_cons(formulation)
+    pivot_indices = MadAI.get_kkt_indices(model, pivot_vars, pivot_cons)
+    pivot_indices = convert(Vector{Int32}, pivot_indices)
+    blocks = MadAI.partition_indices_by_layer(model, formulation; indices = pivot_indices)
+    pivot_solver_opt = MadAI.BlockTriangularOptions(; blocks)
+    opt = MadAI.SchurComplementOptions(;
+        ReducedSolver = MadNLPHSL.Ma57Solver,
+        PivotSolver = MadAI.BlockTriangularSolver,
+        pivot_indices,
+        pivot_solver_opt,
+    )
+end
 
 # The above are all inputs into this function
 
@@ -63,8 +83,8 @@ for iterate in iterate_data["iterates"]
     MadNLP.full(MadNLP.get_x(madnlp)) .= x
     MadNLP.get_y(madnlp) .= y
     # TODO: Fix dimension mismatch errors
-    MadNLP.get_zl_r(madnlp) .= zL
-    MadNLP.get_zu_r(madnlp) .= zU
+    MadNLP.full(MadNLP.get_zl(madnlp)) .= zL
+    MadNLP.full(MadNLP.get_zu(madnlp)) .= zU
     MadNLP.set_mu!(madnlp, μ)
 
     # Re-evaluate quantities that depend on x and y.
@@ -118,7 +138,6 @@ for iterate in iterate_data["iterates"]
     )
     t_solve = time() - _t
 
-    full_matrix = MadAI.fill_upper_triangle(matrix)
     residual = maximum(abs.(full_matrix * sol - rhs))
 
     push!(data,
