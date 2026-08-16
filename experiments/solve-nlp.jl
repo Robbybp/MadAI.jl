@@ -25,6 +25,9 @@ const OPTIMIZER_LOOKUP = Dict(
     "madnlp" => MadNLP.Optimizer,
 )
 ARGS_WHEN_INCLUDED = Dict(
+    "modelname" => "mnist",
+    "nodes" => 128,
+    "layers" => 4,
     "solver" => "madnlp",
     "linear-solver" => "ma57",
     "write-iterates" => 10,
@@ -34,6 +37,17 @@ ARGS_WHEN_INCLUDED = Dict(
 function parse_commandline()
     settings = ArgParse.ArgParseSettings()
     ArgParse.@add_arg_table! settings begin
+        "modelname"
+            help = "Model name"
+            required = true
+        "--nodes"
+            help = "Number of nodes per hidden layer"
+            arg_type = Int
+            required = true
+        "--layers"
+            help = "Number of hidden layers"
+            arg_type = Int
+            required = true
         "--solver"
             help = "NLP solver: madnlp or ipopt"
             default = "ipopt"
@@ -64,12 +78,14 @@ function get_optimizer(solver, linear_solver)
             MadNLP.Optimizer,
             "linear_solver" => MADNLP_LINEAR_SOLVERS[linear_solver],
             "tol" => 1e-6,
+            "acceptable_tol" => 1e-4,
         )
     end
     return JuMP.optimizer_with_attributes(
         Ipopt.Optimizer,
         "linear_solver" => linear_solver,
         "tol" => 1e-6,
+        "acceptable_tol" => 1e-4,
     )
 end
 
@@ -111,12 +127,10 @@ end
 #    return iterates, MyCallback
 #end
 
-# TODO: Expose these in CLI
-modelname = "mnist"
-nodes = 128
-layers = 4
-
 args = abspath(PROGRAM_FILE) == (@__FILE__) ? parse_commandline() : ARGS_WHEN_INCLUDED
+modelname = args["modelname"]
+nodes = args["nodes"]
+layers = args["layers"]
 model, formulation = get_model(modelname, nodes, layers)
 
 JuMP.set_optimizer(model, OPTIMIZER_LOOKUP[args["solver"]])
