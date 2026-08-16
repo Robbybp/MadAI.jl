@@ -1,69 +1,68 @@
 import JSON
+import SparseArrays
+import JuMP
 import NLPModelsJuMP
 import MadNLP
+import MadNLPHSL
+import MadAI
 
 include("JuMP/models.jl")
 
 modelname = "mnist"
 nodes = 128
 layers = 4
-iter_no = 1
 
 DATADIR = joinpath(@__DIR__, "data", "iterates")
-fname = "$modelname-$(nodes)nodes$(layers)layers.json"
+fname = "$modelname-$(nodes)nodes$(layers)layers-first.json"
 fpath = joinpath(DATADIR, fname)
-iterates = open(fpath, "r") do io
+iterate_data = open(fpath, "r") do io
     return JSON.parse(io)
 end
-iterate = iterates[iter_no]
+
+LinearSolver = MadNLPHSL.Ma57Solver
+opt = MadNLP.default_options(LinearSolver)
+
+# The above are all inputs into this function
+
 model, formulation = get_model(modelname, nodes, layers)
+# These three lines stay with the model. If the model is an input, these
+# will get popped up.
+variables, constraints = MadAI.get_var_con_order(model)
+@assert all(iterate_data["variables"] .== string.(JuMP.index.(variables)))
+@assert all(iterate_data["constraints"] .== string.(JuMP.index.(constraints)))
 nlp = NLPModelsJuMP.MathOptNLPModel(model)
 
 # TODO: Options and print level
+# NOTE: MadNLP is initialize with a linear solver, but this doesn't matter for
+# our purposes. We will never use this linear solver for anything. We only use
+# MadNLP to construct the KKT matrix.
 madnlp = MadNLP.MadNLPSolver(nlp)
-# TODO:
-# - Initialize solver with primal-dual iterate and barrier parameter
-#   (Do I need to worry about bound multipliers? Probably not for the symmetric
-#   KKT matrix. But these do show up on the diagonal of the KKT matrix...)
-# - Evaluate KKT matrix and RHS
-#
-
 MadNLP.initialize!(madnlp)
 
-# TODO: Some method like this should really be part of NLPModelsJuMP
-variables, constraints = MadAI.get_var_con_order(model)
+matrix = MadNLP.get_kkt(MadNLP.get_kkt(madnlp))
+# TODO: Extract derived matrix if necessary.
+# This matrix is used to initialize the linear solver. We must update it
+# in-place every time we change to a new iterate.
 
-# I think I prefer the implementation below
-#function _get_vectors(iterate)
-#    # Map variables to the value specified
-#    x = map(var -> iterate["primal"][JuMP.name(var)], variables)
-#    y = map(con -> iterate["dual"][JuMP.name(con)], constraints)
-#    zL = map(var -> iterate["Ldual"][JuMP.name(var)], variables)
-#    zU = map(var -> iterate["Udual"][JuMP.name(var)], variables)
-#    return (; x, y, zL, zU)
-#end
+_t = time()
+linear_solver = LinearSolver(matrix; opt)
+# This is necessary for iterative refinement.
+full_matrix, tril_to_full_view = MadNLP.get_tril_to_full(matrix)
+t_init = time() - _t
 
-# Alternatively:
-nlp_varnames = JuMP.name.(variables)
-nlp_connames = JuMP.name.(constraints)
-primal_order = indexin(iterate_varnames, nlp_varnames)
-dual_order = indexin(iterate_connames, nlp_connames)
-function _get_vectors(iterate)
-    x = iterate["primal"][primal_order]
-    y = iterate["dual"][dual_order]
-    zL = iterate["Ldual"][primal_order]
-    zU = iterate["Udual"][primal_order]
-    return (; x, y, zL, zU)
-end
-
-for iterate in iterates
-    x, y, zL, zU = _get_vectors(iterate)
+data = Any[]
+for iterate in iterate_data["iterates"]
+    x = iterate["primal"]
+    y = iterate["dual"]
+    zL = iterate["Ldual"]
+    zU = iterate["Udual"]
     μ = iterate["barrier"]
 
     # TODO: Make sure this is right
     # Values must use MadNLP's *reformulated* ordering.
     MadNLP.full(MadNLP.get_x(madnlp)) .= x
     MadNLP.get_y(madnlp) .= y
+    # TODO: Fix dimension mismatch errors
     MadNLP.get_zl_r(madnlp) .= zL
     MadNLP.get_zu_r(madnlp) .= zU
     MadNLP.set_mu!(madnlp, μ)
@@ -91,6 +90,49 @@ for iterate in iterates
         MadNLP.get_opt(madnlp).kappa_d,
     )
 
-    K = MadNLP.get_kkt(MadNLP.get_kkt(madnlp))
+    madnlp_matrix = MadNLP.get_kkt(MadNLP.get_kkt(madnlp))
     rhs = MadNLP.primal_dual(MadNLP.get_p(madnlp))
+    sol = copy(rhs)
+    # TODO: Construct derived matrix if necessary
+    linear_solver.csc .= madnlp_matrix
+
+    local _t = time()
+    MadNLP.factorize!(linear_solver)
+    npos, nzero, nneg = MadNLP.inertia(linear_solver)
+    t_factorize = time() - _t
+
+    _t = time()
+    MadNLP.solve!(linear_solver, sol)
+    # Confusingly, the full matrix gets updated using the linear solver's matrix
+    # as part of this function, so there is no need to update it beforehand.
+    # But here's how it would be done if we needed to:
+    #     full_matrix.nzval .= tril_to_full_view
+    refine_res = MadAI.refine!(
+        sol,
+        linear_solver,
+        rhs;
+        max_iter = 20,
+        tol = 1e-5,
+        full_matrix,
+        tril_to_full_view,
+    )
+    t_solve = time() - _t
+
+    full_matrix = MadAI.fill_upper_triangle(matrix)
+    residual = maximum(abs.(full_matrix * sol - rhs))
+
+    push!(data,
+        (;
+            dim = matrix.m,
+            nnz = SparseArrays.nnz(matrix),
+            # Other identifies, like model and solver, will be added one level up
+            t_init,
+            t_factorize,
+            t_solve,
+            nneg_eig = nneg,
+            residual,
+            refine_success = refine_res.success,
+            refine_iter = refine_res.iterations,
+        )
+    )
 end
