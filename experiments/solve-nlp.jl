@@ -24,6 +24,12 @@ const OPTIMIZER_LOOKUP = Dict(
     "ipopt" => Ipopt.Optimizer,
     "madnlp" => MadNLP.Optimizer,
 )
+ARGS_WHEN_INCLUDED = Dict(
+    "solver" => "madnlp",
+    "linear-solver" => "ma57",
+    "write-iterates" => 10,
+    "last-iterates" => false,
+)
 
 function parse_commandline()
     settings = ArgParse.ArgParseSettings()
@@ -110,7 +116,7 @@ modelname = "mnist"
 nodes = 128
 layers = 4
 
-args = parse_commandline()
+args = abspath(PROGRAM_FILE) == (@__FILE__) ? parse_commandline() : ARGS_WHEN_INCLUDED
 model, formulation = get_model(modelname, nodes, layers)
 
 JuMP.set_optimizer(model, OPTIMIZER_LOOKUP[args["solver"]])
@@ -141,8 +147,8 @@ if args["write-iterates"] >= 1 && args["solver"] == "madnlp"
     end
     variables, constraints = MadAI.get_var_con_order(model)
     iterate_data = Dict{String,Any}(
-        "variables" => JuMP.name.(variables),
-        "constraints" => JuMP.name.(constraints),
+        "variables" => string.(JuMP.index.(variables)),
+        "constraints" => string.(JuMP.index.(constraints)),
         "iterates" => iterates_to_write,
     )
     fname = "$modelname-$(nodes)nodes$(layers)layers$(suffix).json"
