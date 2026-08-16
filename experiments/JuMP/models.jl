@@ -24,6 +24,7 @@ function get_model(modelname, nodes, layers)
     nn = get_nn(modelname, nodes, layers)
     dir = mktempdir()
     nnfile = joinpath(dir, "temp.pt")
+    println("Temporarily saving full NN model to $nnfile")
     torch.save(nn, nnfile)
     return get_model(modelname, nnfile)
 end
