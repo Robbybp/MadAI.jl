@@ -69,10 +69,13 @@ function get_kkt_indices(model::JuMP.Model, variables::Vector, constraints::Vect
     con_idx_map = Dict(con => i for (i, con) in enumerate(conorder))
     vindices = [var_idx_map[v] for v in variables]
     cindices = [con_idx_map[c] for c in constraints]
-    ind_cons = MadNLP.get_index_constraints(nlp)
+    # As of MadNLP 0.9.0, the constraint indices are stored on the callback
+    # rather than in a separate data structure
+    #ind_cons = MadNLP.get_index_constraints(nlp)
+    cb = MadNLP.create_callback(MadNLP.SparseCallback, nlp)
     nvar = length(varorder)
     ncon = length(conorder)
-    nslack = length(ind_cons.ind_ineq)
+    nslack = length(cb.ind_ineq)
     kkt_dim = nvar + ncon + nslack
     kkt_vindices = vindices
     kkt_cindices = cindices .+ (nvar + nslack)
@@ -118,12 +121,14 @@ function get_kkt(
     opt_linear_solver = MadNLP.default_options(Solver),
 )
     nlp = NLPModelsJuMP.MathOptNLPModel(model)
-    ind_cons = MadNLP.get_index_constraints(nlp)
+    # get_index_constraints removed in MadNLP 0.9.0
+    #ind_cons = MadNLP.get_index_constraints(nlp)
     cb = MadNLP.create_callback(MadNLP.SparseCallback, nlp)
+    # As of 0.9.0, create_kkt_system doesn't require ind_cons
     kkt_system = MadNLP.create_kkt_system(
         MadNLP.SparseKKTSystem,
         cb,
-        ind_cons,
+        #ind_cons,
         Solver;
         opt_linear_solver,
     )
