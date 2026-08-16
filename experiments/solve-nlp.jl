@@ -105,28 +105,6 @@ function (cb::Callback)(solver::MadNLP.AbstractMadNLPSolver, mode)
     return true
 end
 
-#function madnlp_iterate_callback(model)
-#    variables, constraints = MadAI.get_var_con_order(model)
-#    iterates = Dict{String,Any}(
-#        "variables" => JuMP.name.(variables),
-#        "constraints" => JuMP.name.(constraints),
-#        "iterates" => Any[],
-#    )
-#
-#    function MyCallback(solver, status)
-#        status isa MadNLP.UserCallbackRegular || return true
-#        push!(iterates["iterates"], Dict{String,Any}(
-#            "primal" => copy(MadNLP.primal(MadNLP.get_x(solver))),
-#            "dual" => copy(MadNLP.get_y(solver)),
-#            "Ldual" => copy(MadNLP.primal(MadNLP.get_zl(solver))),
-#            "Udual" => copy(MadNLP.primal(MadNLP.get_zu(solver))),
-#            "barrier" => MadNLP.get_mu(solver),
-#        ))
-#        return true
-#    end
-#    return iterates, MyCallback
-#end
-
 args = abspath(PROGRAM_FILE) == (@__FILE__) ? parse_commandline() : ARGS_WHEN_INCLUDED
 modelname = args["modelname"]
 nodes = args["nodes"]
