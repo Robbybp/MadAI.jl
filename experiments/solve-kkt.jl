@@ -17,12 +17,15 @@ nodes = 128
 layers = 4
 
 DATADIR = joinpath(@__DIR__, "data", "iterates")
-fname = "$modelname-$(nodes)nodes$(layers)layers-first.json"
+fname = "$modelname-$(nodes)nodes$(layers)layers-last.json"
 fpath = joinpath(DATADIR, fname)
 iterate_data = open(fpath, "r") do io
     return JSON.parse(io)
 end
 
+# The above are all inputs into this function
+
+model, formulation = get_model(modelname, nodes, layers)
 USE_MA57 = false
 if USE_MA57
     LinearSolver = MadNLPHSL.Ma57Solver
@@ -42,9 +45,6 @@ else
     )
 end
 
-# The above are all inputs into this function
-
-model, formulation = get_model(modelname, nodes, layers)
 # These three lines stay with the model. If the model is an input, these
 # will get popped up.
 variables, constraints = MadAI.get_var_con_order(model)
