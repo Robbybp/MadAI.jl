@@ -31,7 +31,6 @@ ARGS_WHEN_INCLUDED = Dict(
     "solver" => "madnlp",
     "linear-solver" => "ma57",
     "write-iterates" => 10,
-    "last-iterates" => false,
 )
 
 function parse_commandline()
@@ -58,10 +57,6 @@ function parse_commandline()
             help = "Number of iterates to write. Default, 0, writes nothing."
             arg_type = Int
             default = 0
-        "--last-iterates"
-            help = "Write the last N iterates. Default is to write the first N."
-            action = :store_true
-            default = false
     end
     args = ArgParse.parse_args(settings)
     args["solver"] = lowercase(args["solver"])
@@ -129,24 +124,22 @@ if args["write-iterates"] >= 1 && args["solver"] == "madnlp"
         error("$n_iter iterates requested, but solve only had $(length(cb.iterates)) iterations")
     end
 
-    if args["last-iterates"]
-        iter_start = length(cb.iterates) - n_iter
-        iterates_to_write = cb.iterates[iter_start:end]
-        suffix = "-last"
-    else
-        iterates_to_write = cb.iterates[1:n_iter]
-        suffix = "-first"
-    end
     variables, constraints = MadAI.get_var_con_order(model)
-    iterate_data = Dict{String,Any}(
-        "variables" => string.(JuMP.index.(variables)),
-        "constraints" => string.(JuMP.index.(constraints)),
-        "iterates" => iterates_to_write,
+    for (suffix, iterates_to_write) in (
+        ("-first", cb.iterates[1:n_iter]),
+        ("-last", cb.iterates[end-n_iter+1:end]),
     )
-    fname = "$modelname-$(nodes)nodes$(layers)layers$(suffix).json"
-    fpath = joinpath(@__DIR__, "data", "iterates", fname)
-    mkpath(dirname(fpath))
-    open(fpath, "w") do io
-        JSON.print(io, iterate_data, 1)
+        iterate_data = Dict{String,Any}(
+            "variables" => string.(JuMP.index.(variables)),
+            "constraints" => string.(JuMP.index.(constraints)),
+            "iterates" => iterates_to_write,
+        )
+        fname = "$modelname-$(nodes)nodes$(layers)layers$(suffix).json"
+        println("Writing $n_iter iterates to $fname")
+        fpath = joinpath(@__DIR__, "data", "iterates", fname)
+        mkpath(dirname(fpath))
+        open(fpath, "w") do io
+            JSON.print(io, iterate_data, 1)
+        end
     end
 end
