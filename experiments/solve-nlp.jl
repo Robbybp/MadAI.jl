@@ -67,23 +67,6 @@ function parse_commandline()
     return args
 end
 
-function get_optimizer(solver, linear_solver)
-    if solver == "madnlp"
-        return JuMP.optimizer_with_attributes(
-            MadNLP.Optimizer,
-            "linear_solver" => MADNLP_LINEAR_SOLVERS[linear_solver],
-            "tol" => 1e-6,
-            "acceptable_tol" => 1e-4,
-        )
-    end
-    return JuMP.optimizer_with_attributes(
-        Ipopt.Optimizer,
-        "linear_solver" => linear_solver,
-        "tol" => 1e-6,
-        "acceptable_tol" => 1e-4,
-    )
-end
-
 struct Callback <: MadNLP.AbstractUserCallback
     iterates::Vector{Any}
     Callback() = new([])
@@ -108,6 +91,7 @@ model, formulation = get_model(modelname, nodes, layers)
 
 JuMP.set_optimizer(model, OPTIMIZER_LOOKUP[args["solver"]])
 JuMP.set_optimizer_attribute(model, "linear_solver", LINEAR_SOLVER_LOOKUP[args["solver"], args["linear-solver"]])
+JuMP.set_optimizer_attributes(model, "max_iter" => 6000)
 # TODO: Linear solver options
 
 if args["solver"] == "madnlp"
