@@ -1,0 +1,4 @@
+data/weights/mnist-tanh128nodes4layers.pt filter=lfs diff=lfs merge=lfs -text
+data/weights/mnist-tanh2048nodes4layers.pt filter=lfs diff=lfs merge=lfs -text
+data/weights/mnist-tanh512nodes4layers.pt filter=lfs diff=lfs merge=lfs -text
+data/weights/mnist-tanh1024nodes4layers.pt filter=lfs diff=lfs merge=lfs -text
