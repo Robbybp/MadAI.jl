@@ -94,11 +94,12 @@ end
 function summarize_results(results)
     isempty(results) && return DataFrames.DataFrame()
     results_df = DataFrames.DataFrame(results)
-    aggregate_columns = [:t_factorize, :t_solve, :residual, :refine_iter]
+    aggregate_columns = [:t_factorize, :t_solve, :residual, :refine_iter, :refine_success]
     group_columns = setdiff(propertynames(results_df), aggregate_columns)
     summary = DataFrames.combine(
         DataFrames.groupby(results_df, group_columns),
         DataFrames.nrow => :n_iterates,
+        :refine_success => sum => :refine_success,
         :t_factorize => sum => :t_factorize,
         :t_solve => sum => :t_solve,
         :residual => Statistics.mean => :residual,
