@@ -66,7 +66,7 @@ function solve_kkt(nlp, LinearSolver, opt_linear_solver, iterates)
         rhs = MadNLP.primal_dual(MadNLP.get_p(madnlp))
         sol = copy(rhs)
         # TODO: Construct derived matrix if necessary
-        linear_solver.csc .= madnlp_matrix
+        linear_solver.csc.nzval .= madnlp_matrix.nzval
 
         local _t = time()
         MadNLP.factorize!(linear_solver)
