@@ -2,3 +2,11 @@ data/weights/mnist-tanh128nodes4layers.pt filter=lfs diff=lfs merge=lfs -text
 data/weights/mnist-tanh2048nodes4layers.pt filter=lfs diff=lfs merge=lfs -text
 data/weights/mnist-tanh512nodes4layers.pt filter=lfs diff=lfs merge=lfs -text
 data/weights/mnist-tanh1024nodes4layers.pt filter=lfs diff=lfs merge=lfs -text
+data/iterates/mnist-512nodes4layers-last.json filter=lfs diff=lfs merge=lfs -text
+data/iterates/mnist-1024nodes4layers-first.json filter=lfs diff=lfs merge=lfs -text
+data/iterates/mnist-1024nodes4layers-last.json filter=lfs diff=lfs merge=lfs -text
+data/iterates/mnist-128nodes4layers-first.json filter=lfs diff=lfs merge=lfs -text
+data/iterates/mnist-128nodes4layers-last.json filter=lfs diff=lfs merge=lfs -text
+data/iterates/mnist-2048nodes4layers-first.json filter=lfs diff=lfs merge=lfs -text
+data/iterates/mnist-2048nodes4layers-last.json filter=lfs diff=lfs merge=lfs -text
+data/iterates/mnist-512nodes4layers-first.json filter=lfs diff=lfs merge=lfs -text
