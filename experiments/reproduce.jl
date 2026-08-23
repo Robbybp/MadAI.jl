@@ -57,10 +57,17 @@ function runtime_experiment()
     first_results = NamedTuple[]
     last_results = NamedTuple[]
     for modelname in ("mnist",),
-        (nodes, layers) in ((512, 4), (1024, 4))
+        (nodes, layers) in ((512, 4), (1024, 4), (2048, 4))
         model, formulation = get_model(modelname, nodes, layers)
         nlp = NLPModelsJuMP.MathOptNLPModel(model)
         for iterate_set in ("first", "last")
+            # NOTE: We skip these when using the "old method"...
+            if iterate_set == "last"
+                continue
+            end
+            if nodes == 2048 && iterate_set == "last"
+                continue
+            end
             iterates = load_iterates(model, modelname, nodes, layers, iterate_set)
             for LinearSolver in (MadNLPHSL.Ma57Solver, MadAI.SchurComplementSolver)
                 opt_linear_solver = get_linear_solver_options(LinearSolver, model, formulation)
@@ -89,13 +96,30 @@ function summarize_results(results)
     results_df = DataFrames.DataFrame(results)
     aggregate_columns = [:t_factorize, :t_solve, :residual, :refine_iter]
     group_columns = setdiff(propertynames(results_df), aggregate_columns)
-    return DataFrames.combine(
+    summary = DataFrames.combine(
         DataFrames.groupby(results_df, group_columns),
+        DataFrames.nrow => :n_iterates,
         :t_factorize => sum => :t_factorize,
         :t_solve => sum => :t_solve,
         :residual => Statistics.mean => :residual,
         :refine_iter => Statistics.mean => :refine_iter,
     )
+
+    key(row) = (row.modelname, row.nodes, row.layers)
+    is_baseline(row) = row.LinearSolver in (MadNLPHSL.Ma57Solver, MadNLPHSL.Ma86Solver)
+    baseline_times = Dict(
+        key(row) => (row.t_factorize + row.t_solve) / row.n_iterates
+        for row in DataFrames.eachrow(summary) if is_baseline(row)
+    )
+    speedup = fill(NaN, DataFrames.nrow(summary))
+    for (i, row) in enumerate(DataFrames.eachrow(summary))
+        if row.LinearSolver === MadAI.SchurComplementSolver
+            schur_time = (row.t_factorize + row.t_solve) / row.n_iterates
+            speedup[i] = get(baseline_times, key(row), NaN) / schur_time
+        end
+    end
+    summary.speedup = speedup
+    return summary
 end
 
 function main()
