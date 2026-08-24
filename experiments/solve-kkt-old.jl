@@ -370,7 +370,7 @@ end
 This call signature is used for compatibility with my new function.
 `iterates` is unused.
 """
-function solve_kkt(
+function solve_kkt_old(
     nlp, LinearSolver, opt_linear_solver, iterates;
     madnlp_opt = Dict{Symbol,Any}(),
 )
