@@ -8,7 +8,7 @@ import MadNLPHSL
 import NLPModelsJuMP
 import Statistics
 
-#include("solve-kkt.jl")
+include("solve-kkt.jl")
 include("solve-kkt-old.jl")
 include("JuMP/models.jl")
 
@@ -18,6 +18,10 @@ function parse_commandline()
         "experiment"
             help = "Experiment to run"
             required = true
+        "--old"
+            help = "Use the old KKT-construction method"
+            action = :store_true
+            default = false
     end
     return ArgParse.parse_args(settings)
 end
@@ -53,7 +57,7 @@ function load_iterates(model, modelname, nodes, layers, iterate_set)
     return iterate_data["iterates"]
 end
 
-function runtime_experiment()
+function runtime_experiment(; old = false)
     first_results = NamedTuple[]
     last_results = NamedTuple[]
     for modelname in ("mnist",),
@@ -61,24 +65,24 @@ function runtime_experiment()
         model, formulation = get_model(modelname, nodes, layers)
         nlp = NLPModelsJuMP.MathOptNLPModel(model)
         for iterate_set in ("first", "last")
-            # NOTE: We skip these when using the "old method"...
-            if iterate_set == "last"
-                continue
-            end
-            if nodes == 2048 && iterate_set == "last"
+            if iterate_set == "last" && (old || nodes == 2048)
                 continue
             end
             iterates = load_iterates(model, modelname, nodes, layers, iterate_set)
             for LinearSolver in (MadNLPHSL.Ma57Solver, MadAI.SchurComplementSolver)
                 opt_linear_solver = get_linear_solver_options(LinearSolver, model, formulation)
-
-                # When iterating with SchurComplementSolver, we always need to pass its options
-                # to MadNLP
-                madnlp_opt = get_linear_solver_options(MadAI.SchurComplementSolver, model, formulation)
-                fields = fieldnames(typeof(madnlp_opt))
-                madnlp_opt = Dict(zip(fields, map(f -> getproperty(madnlp_opt, f), fields)))
-                # Note the updated call signature
-                iterate_results = solve_kkt(nlp, LinearSolver, opt_linear_solver, iterates; madnlp_opt)
+                if old
+                    madnlp_opt = get_linear_solver_options(
+                        MadAI.SchurComplementSolver, model, formulation,
+                    )
+                    fields = fieldnames(typeof(madnlp_opt))
+                    madnlp_opt = Dict(zip(fields, getproperty.(Ref(madnlp_opt), fields)))
+                    iterate_results = solve_kkt_old(
+                        nlp, LinearSolver, opt_linear_solver, iterates; madnlp_opt,
+                    )
+                else
+                    iterate_results = solve_kkt(nlp, LinearSolver, opt_linear_solver, iterates)
+                end
 
                 metadata = (; nodes, layers, modelname, LinearSolver)
                 target = iterate_set == "first" ? first_results : last_results
@@ -126,7 +130,7 @@ end
 function main()
     args = parse_commandline()
     if args["experiment"] == "runtime"
-        return runtime_experiment()
+        return runtime_experiment(; old = args["old"])
     end
     error("Unknown experiment: $(args["experiment"])")
 end
