@@ -1,5 +1,6 @@
 using Printf
 import SparseArrays
+import LinearAlgebra
 
 import JuMP
 import MadNLP
@@ -373,6 +374,8 @@ This call signature is used for compatibility with my new function.
 function solve_kkt_old(
     nlp, LinearSolver, opt_linear_solver, iterates;
     madnlp_opt = Dict{Symbol,Any}(),
+    return_iterates = false,
+    return_kkt = false,
 )
     # MadNLP must always use the same linear solver, otherwise the matrices
     # we end up with will be slightly different between different solvers.
@@ -437,7 +440,7 @@ function solve_kkt_old(
 
         residual = maximum(abs.(full_matrix * sol - rhs))
 
-        push!(results, (;
+        result = (;
             dim = matrix.m,
             nnz = SparseArrays.nnz(matrix),
             t_init,
@@ -447,7 +450,22 @@ function solve_kkt_old(
             residual,
             refine_success = refine_res.success,
             refine_iter = refine_res.iterations,
-        ))
+        )
+        if return_iterates
+            result = merge(result, (; iterates = Dict{String,Any}(
+                "primal" => copy(MadNLP.primal(MadNLP.get_x(madnlp))),
+                "dual" => copy(MadNLP.get_y(madnlp)),
+                "Ldual" => copy(MadNLP.primal(MadNLP.get_zl(madnlp))),
+                "Udual" => copy(MadNLP.primal(MadNLP.get_zu(madnlp))),
+                "barrier" => MadNLP.get_mu(madnlp),
+                # `regular!` may modify this through inertia correction.
+                "regularized_kkt_diagonal" => copy(LinearAlgebra.diag(matrix)),
+            )))
+        end
+        if return_kkt
+            result = merge(result, (; kkt = copy(matrix), rhs = copy(rhs)))
+        end
+        push!(results, result)
     end
     return results
 end
