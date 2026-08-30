@@ -1,5 +1,6 @@
 import JSON
 import SparseArrays
+import LinearAlgebra
 import JuMP
 import NLPModelsJuMP
 import MadNLP
@@ -8,6 +9,62 @@ import MadAI
 
 function MadNLP.solve!(solver::MadNLP.AbstractLinearSolver, rhs::Vector)
     return MadNLP.solve_linear_system!(solver, rhs)
+end
+
+function iterate_to_kkt(nlp::NLPModelsJuMP.MathOptNLPModel, iterate::Dict)
+    madnlp = MadNLP.MadNLPSolver(nlp)
+    MadNLP.initialize!(madnlp)
+    return iterate_to_kkt(madnlp, iterate)
+end
+
+function iterate_to_kkt(madnlp::MadNLP.MadNLPSolver, iterate::Dict)
+    x = iterate["primal"]
+    y = iterate["dual"]
+    zL = iterate["Ldual"]
+    zU = iterate["Udual"]
+    μ = iterate["barrier"]
+
+    # TODO: Make sure this is right
+    # Values must use MadNLP's *reformulated* ordering.
+    MadNLP.full(MadNLP.get_x(madnlp)) .= x
+    MadNLP.get_y(madnlp) .= y
+    # TODO: Fix dimension mismatch errors
+    MadNLP.full(MadNLP.get_zl(madnlp)) .= zL
+    MadNLP.full(MadNLP.get_zu(madnlp)) .= zU
+    MadNLP.set_mu!(madnlp, μ)
+
+    # Re-evaluate quantities that depend on x and y.
+    MadNLP.set_obj_val!(madnlp,
+        MadNLP.eval_f_wrapper(madnlp, MadNLP.get_x(madnlp)))
+    MadNLP.eval_cons_wrapper!(madnlp, MadNLP.get_c(madnlp), MadNLP.get_x(madnlp))
+    MadNLP.eval_grad_f_wrapper!(madnlp, MadNLP.get_f(madnlp), MadNLP.get_x(madnlp))
+    MadNLP.eval_jac_wrapper!(madnlp, MadNLP.get_kkt(madnlp), MadNLP.get_x(madnlp))
+    MadNLP.eval_lag_hess_wrapper!(
+        madnlp, MadNLP.get_kkt(madnlp), MadNLP.get_x(madnlp), MadNLP.get_y(madnlp),
+    )
+
+    # Form the augmented KKT system and its RHS.
+    MadNLP.set_aug_diagonal!(MadNLP.get_kkt(madnlp), madnlp)
+    MadNLP.jtprod!(MadNLP.get_jacl(madnlp), MadNLP.get_kkt(madnlp), MadNLP.get_y(madnlp))
+    #MadNLP.set_aug_rhs!(
+    #    madnlp, MadNLP.get_kkt(madnlp), MadNLP.get_c(madnlp), MadNLP.get_mu(madnlp),
+    #)
+    MadNLP.dual_inf_perturbation!(
+        MadNLP.primal(MadNLP.get_p(madnlp)),
+        MadNLP.get_ind_llb(madnlp),
+        MadNLP.get_ind_uub(madnlp),
+        MadNLP.get_mu(madnlp),
+        MadNLP.get_opt(madnlp).kappa_d,
+    )
+
+    madnlp_matrix = MadNLP.get_kkt(MadNLP.get_kkt(madnlp))
+    if haskey(iterate, "regularized_kkt_diagonal")
+        regularized_diagonal = iterate["regularized_kkt_diagonal"]
+        @assert length(regularized_diagonal) == size(madnlp_matrix, 1)
+        madnlp_matrix[LinearAlgebra.diagind(madnlp_matrix)] .= regularized_diagonal
+    end
+    rhs = MadNLP.primal_dual(MadNLP.get_p(madnlp))
+    return madnlp_matrix, rhs
 end
 
 function solve_kkt(nlp, LinearSolver, opt_linear_solver, iterates)
@@ -24,46 +81,56 @@ function solve_kkt(nlp, LinearSolver, opt_linear_solver, iterates)
 
     results = Any[]
     for iterate in iterates
-        x = iterate["primal"]
-        y = iterate["dual"]
-        zL = iterate["Ldual"]
-        zU = iterate["Udual"]
-        μ = iterate["barrier"]
+        iterate = Dict(iterate)
+        # OR:
+        madnlp_matrix, rhs = iterate_to_kkt(madnlp, iterate)
 
-        # TODO: Make sure this is right
-        # Values must use MadNLP's *reformulated* ordering.
-        MadNLP.full(MadNLP.get_x(madnlp)) .= x
-        MadNLP.get_y(madnlp) .= y
-        # TODO: Fix dimension mismatch errors
-        MadNLP.full(MadNLP.get_zl(madnlp)) .= zL
-        MadNLP.full(MadNLP.get_zu(madnlp)) .= zU
-        MadNLP.set_mu!(madnlp, μ)
+        #x = iterate["primal"]
+        #y = iterate["dual"]
+        #zL = iterate["Ldual"]
+        #zU = iterate["Udual"]
+        #μ = iterate["barrier"]
 
-        # Re-evaluate quantities that depend on x and y.
-        MadNLP.set_obj_val!(madnlp,
-            MadNLP.eval_f_wrapper(madnlp, MadNLP.get_x(madnlp)))
-        MadNLP.eval_cons_wrapper!(madnlp, MadNLP.get_c(madnlp), MadNLP.get_x(madnlp))
-        MadNLP.eval_grad_f_wrapper!(madnlp, MadNLP.get_f(madnlp), MadNLP.get_x(madnlp))
-        MadNLP.eval_jac_wrapper!(madnlp, MadNLP.get_kkt(madnlp), MadNLP.get_x(madnlp))
-        MadNLP.eval_lag_hess_wrapper!(
-            madnlp, MadNLP.get_kkt(madnlp), MadNLP.get_x(madnlp), MadNLP.get_y(madnlp),
-        )
+        ## TODO: Make sure this is right
+        ## Values must use MadNLP's *reformulated* ordering.
+        #MadNLP.full(MadNLP.get_x(madnlp)) .= x
+        #MadNLP.get_y(madnlp) .= y
+        ## TODO: Fix dimension mismatch errors
+        #MadNLP.full(MadNLP.get_zl(madnlp)) .= zL
+        #MadNLP.full(MadNLP.get_zu(madnlp)) .= zU
+        #MadNLP.set_mu!(madnlp, μ)
 
-        # Form the augmented KKT system and its RHS.
-        MadNLP.set_aug_diagonal!(MadNLP.get_kkt(madnlp), madnlp)
-        MadNLP.set_aug_rhs!(
-            madnlp, MadNLP.get_kkt(madnlp), MadNLP.get_c(madnlp), MadNLP.get_mu(madnlp),
-        )
-        MadNLP.dual_inf_perturbation!(
-            MadNLP.primal(MadNLP.get_p(madnlp)),
-            MadNLP.get_ind_llb(madnlp),
-            MadNLP.get_ind_uub(madnlp),
-            MadNLP.get_mu(madnlp),
-            MadNLP.get_opt(madnlp).kappa_d,
-        )
+        ## Re-evaluate quantities that depend on x and y.
+        #MadNLP.set_obj_val!(madnlp,
+        #    MadNLP.eval_f_wrapper(madnlp, MadNLP.get_x(madnlp)))
+        #MadNLP.eval_cons_wrapper!(madnlp, MadNLP.get_c(madnlp), MadNLP.get_x(madnlp))
+        #MadNLP.eval_grad_f_wrapper!(madnlp, MadNLP.get_f(madnlp), MadNLP.get_x(madnlp))
+        #MadNLP.eval_jac_wrapper!(madnlp, MadNLP.get_kkt(madnlp), MadNLP.get_x(madnlp))
+        #MadNLP.eval_lag_hess_wrapper!(
+        #    madnlp, MadNLP.get_kkt(madnlp), MadNLP.get_x(madnlp), MadNLP.get_y(madnlp),
+        #)
 
-        madnlp_matrix = MadNLP.get_kkt(MadNLP.get_kkt(madnlp))
-        rhs = MadNLP.primal_dual(MadNLP.get_p(madnlp))
+        ## Form the augmented KKT system and its RHS.
+        #MadNLP.set_aug_diagonal!(MadNLP.get_kkt(madnlp), madnlp)
+        #MadNLP.set_aug_rhs!(
+        #    madnlp, MadNLP.get_kkt(madnlp), MadNLP.get_c(madnlp), MadNLP.get_mu(madnlp),
+        #)
+        #MadNLP.dual_inf_perturbation!(
+        #    MadNLP.primal(MadNLP.get_p(madnlp)),
+        #    MadNLP.get_ind_llb(madnlp),
+        #    MadNLP.get_ind_uub(madnlp),
+        #    MadNLP.get_mu(madnlp),
+        #    MadNLP.get_opt(madnlp).kappa_d,
+        #)
+
+        #madnlp_matrix = MadNLP.get_kkt(MadNLP.get_kkt(madnlp))
+        #if haskey(iterate, "regularized_kkt_diagonal")
+        #    regularized_diagonal = iterate["regularized_kkt_diagonal"]
+        #    @assert length(regularized_diagonal) == size(madnlp_matrix, 1)
+        #    madnlp_matrix[LinearAlgebra.diagind(madnlp_matrix)] .= regularized_diagonal
+        #end
+        #rhs = MadNLP.primal_dual(MadNLP.get_p(madnlp))
+
         sol = copy(rhs)
         # TODO: Construct derived matrix if necessary
         linear_solver.csc.nzval .= madnlp_matrix.nzval
