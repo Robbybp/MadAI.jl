@@ -62,10 +62,10 @@ function get_adversarial_model(
     threshold::Float64;
     reduced_space::Bool = false,
     gray_box::Bool = false,
-    vector_nonlinear_oracle::Bool = false,
     device = "cpu",
     hessian = true,
     relaxation_parameter = 1e-6,
+    xstart::Union{Nothing,Dict{String,Float64}} = nothing,
 )
     _t = time()
     # Network is trained so that outputs represent 0-9
@@ -101,7 +101,7 @@ function get_adversarial_model(
     # Fortunately, `vec` stacks matrices by column, so it gives us the correct flattened
     # vector.
 
-    if reduced_space || gray_box || vector_nonlinear_oracle
+    if reduced_space || gray_box
         config = Dict()
     else
         config = Dict(:ReLU => MOAI.ReLUQuadratic(; relaxation_parameter))
@@ -109,7 +109,14 @@ function get_adversarial_model(
 
     m = JuMP.Model()
     #JuMP.@variable(m, 0.0 <= x[1:height_dim, 1:length_dim] <= 1.0, start = 0.5)
-    JuMP.@variable(m, 0.0 <= x[i in 1:height_dim, j in 1:length_dim] <= 1.0, start = xref[i, j])
+    if xstart === nothing
+        getxstart = (i, j) -> xref[i, j]
+    else
+        getxstart = (i, j) -> xstart["x[$i,$j]"]
+    end
+    JuMP.@variable(m, 0.0 <= x[i in 1:height_dim, j in 1:length_dim] <= 1.0,
+        start = getxstart(i, j)
+    )
     y, formulation = MOAI.add_predictor(
         m,
         predictor,
@@ -135,11 +142,17 @@ function get_adversarial_model(
         JuMP.@constraint(m, y .== y_expr)
         # TODO: Potentially add inequality constraints to bound y_expr?
     end
+    for i in eachindex(y)
+        JuMP.set_name(y[i], "y[$i]")
+    end
     JuMP.@constraint(m, 0.0 .<= y .<= 1.0)
 
-    # Initialize intermediate variables to 0.5
-    variables, _ = MadAI.get_vars_cons(formulation)
-    JuMP.set_start_value.(variables, 0.5)
+    # We used to initialize intermediate variables to 0.5, but there is no
+    # reason why this should be a good "midpoint initialization".
+    # Instead, we now rely on MathOptAI to propagate initial x values through
+    # to all the intermediate variables, giving us a primal-feasible initialization.
+    #variables, _ = MadAI.get_vars_cons(formulation)
+    #JuMP.set_start_value.(variables, 0.5)
     dt = time() - _t; println("[$(@sprintf("%1.2f", dt))] Initialize intermediate variables")
 
     # Minimize 1-norm of deviation from reference image using slack variables
