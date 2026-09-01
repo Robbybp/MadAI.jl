@@ -80,56 +80,10 @@ function solve_kkt(nlp, LinearSolver, opt_linear_solver, iterates)
     t_init = time() - _t
 
     results = Any[]
-    for iterate in iterates
+    for (i, iterate) in enumerate(iterates)
+        println("SOLVING KKT FOR ITERATE $i")
         iterate = Dict(iterate)
-        # OR:
         madnlp_matrix, rhs = iterate_to_kkt(madnlp, iterate)
-
-        #x = iterate["primal"]
-        #y = iterate["dual"]
-        #zL = iterate["Ldual"]
-        #zU = iterate["Udual"]
-        #μ = iterate["barrier"]
-
-        ## TODO: Make sure this is right
-        ## Values must use MadNLP's *reformulated* ordering.
-        #MadNLP.full(MadNLP.get_x(madnlp)) .= x
-        #MadNLP.get_y(madnlp) .= y
-        ## TODO: Fix dimension mismatch errors
-        #MadNLP.full(MadNLP.get_zl(madnlp)) .= zL
-        #MadNLP.full(MadNLP.get_zu(madnlp)) .= zU
-        #MadNLP.set_mu!(madnlp, μ)
-
-        ## Re-evaluate quantities that depend on x and y.
-        #MadNLP.set_obj_val!(madnlp,
-        #    MadNLP.eval_f_wrapper(madnlp, MadNLP.get_x(madnlp)))
-        #MadNLP.eval_cons_wrapper!(madnlp, MadNLP.get_c(madnlp), MadNLP.get_x(madnlp))
-        #MadNLP.eval_grad_f_wrapper!(madnlp, MadNLP.get_f(madnlp), MadNLP.get_x(madnlp))
-        #MadNLP.eval_jac_wrapper!(madnlp, MadNLP.get_kkt(madnlp), MadNLP.get_x(madnlp))
-        #MadNLP.eval_lag_hess_wrapper!(
-        #    madnlp, MadNLP.get_kkt(madnlp), MadNLP.get_x(madnlp), MadNLP.get_y(madnlp),
-        #)
-
-        ## Form the augmented KKT system and its RHS.
-        #MadNLP.set_aug_diagonal!(MadNLP.get_kkt(madnlp), madnlp)
-        #MadNLP.set_aug_rhs!(
-        #    madnlp, MadNLP.get_kkt(madnlp), MadNLP.get_c(madnlp), MadNLP.get_mu(madnlp),
-        #)
-        #MadNLP.dual_inf_perturbation!(
-        #    MadNLP.primal(MadNLP.get_p(madnlp)),
-        #    MadNLP.get_ind_llb(madnlp),
-        #    MadNLP.get_ind_uub(madnlp),
-        #    MadNLP.get_mu(madnlp),
-        #    MadNLP.get_opt(madnlp).kappa_d,
-        #)
-
-        #madnlp_matrix = MadNLP.get_kkt(MadNLP.get_kkt(madnlp))
-        #if haskey(iterate, "regularized_kkt_diagonal")
-        #    regularized_diagonal = iterate["regularized_kkt_diagonal"]
-        #    @assert length(regularized_diagonal) == size(madnlp_matrix, 1)
-        #    madnlp_matrix[LinearAlgebra.diagind(madnlp_matrix)] .= regularized_diagonal
-        #end
-        #rhs = MadNLP.primal_dual(MadNLP.get_p(madnlp))
 
         sol = copy(rhs)
         # TODO: Construct derived matrix if necessary
