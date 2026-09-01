@@ -24,6 +24,12 @@ const OPTIMIZER_LOOKUP = Dict(
     "ipopt" => Ipopt.Optimizer,
     "madnlp" => MadNLP.Optimizer,
 )
+const INIT_FROM_GB_OPTIONS = Dict(
+    ("mnist", 128, 4) => (; mu_init = 1e-2, bound_push = 1e-2),
+    ("mnist", 512, 4) => (; mu_init = 1e-2, bound_push = 1e-2),
+    ("mnist", 1024, 4) => (; mu_init = 7e-4, bound_push = 1e2),
+    ("mnist", 2048, 4) => (; mu_init = 1e-3, bound_push = 1e-3),
+)
 ARGS_WHEN_INCLUDED = Dict(
     "modelname" => "mnist",
     "nodes" => 128,
@@ -32,6 +38,9 @@ ARGS_WHEN_INCLUDED = Dict(
     "linear-solver" => "ma57",
     "write-iterates" => 10,
     "gray-box" => false,
+    "initialize-from-gb" => false,
+    #"mu-init" => nothing,
+    #"bound-push" => nothing,
 )
 
 function parse_commandline()
@@ -61,6 +70,15 @@ function parse_commandline()
         "--gray-box"
             help = "Construct the gray-box model"
             action = :store_true
+        "--initialize-from-gb"
+            help = "Initialize from the last saved iterate from the gray-box model"
+            action = :store_true
+        #"--mu-init"
+        #    help = "Initial barrier parameter when initializing from the gray-box model"
+        #    arg_type = Float64
+        #"--bound-push"
+        #    help = "Bound push when initializing from the gray-box model"
+        #    arg_type = Float64
     end
     args = ArgParse.parse_args(settings)
     args["solver"] = lowercase(args["solver"])
@@ -88,15 +106,46 @@ function (cb::Callback)(solver::MadNLP.AbstractMadNLPSolver, mode)
     return true
 end
 
+function get_xstart_from_gb(modelname, nodes, layers)
+    mgb, _ = get_model(modelname, nodes, layers; gray_box = true)
+    fname = "$modelname-$(nodes)nodes$(layers)layers-gb-last.json"
+    fpath = joinpath(@__DIR__, "data", "iterates", fname)
+    iterate_data = open(fpath, "r") do io
+        JSON.parse(io)
+    end
+    variables = JuMP.all_variables(mgb)
+    @assert iterate_data["variables"] == string.(JuMP.index.(variables))
+    last_primal = iterate_data["iterates"][end]["primal"]
+    varnames = JuMP.name.(variables)
+    values_by_name = Dict{String,Float64}(zip(varnames, last_primal))
+    return values_by_name
+end
+
 args = abspath(PROGRAM_FILE) == (@__FILE__) ? parse_commandline() : ARGS_WHEN_INCLUDED
+println("ARGS:")
+display(args)
 modelname = args["modelname"]
 nodes = args["nodes"]
 layers = args["layers"]
-model, formulation = get_model(modelname, nodes, layers; gray_box = args["gray-box"])
+xstart = args["initialize-from-gb"] ? get_xstart_from_gb(modelname, nodes, layers) : nothing
+model, formulation = get_model(
+    modelname, nodes, layers; gray_box = args["gray-box"], xstart,
+)
 
 JuMP.set_optimizer(model, OPTIMIZER_LOOKUP[args["solver"]])
 JuMP.set_optimizer_attribute(model, "linear_solver", LINEAR_SOLVER_LOOKUP[args["solver"], args["linear-solver"]])
-JuMP.set_optimizer_attributes(model, "max_iter" => 6000)
+JuMP.set_optimizer_attributes(model, "max_iter" => 3000)
+if args["initialize-from-gb"]
+    init_options = INIT_FROM_GB_OPTIONS[(modelname, nodes, layers)]
+    #mu_init = something(args["mu-init"], init_options.mu_init)
+    #bound_push = something(args["bound-push"], init_options.bound_push)
+    JuMP.set_optimizer_attribute(model, "bound_push", init_options.bound_push)
+    if args["solver"] == "madnlp"
+        JuMP.set_optimizer_attribute(model, "barrier", MadNLP.MonotoneUpdate(; init_options.mu_init))
+    elseif args["solver"] == "ipopt"
+        JuMP.set_optimizer_attribute(model, "mu_init", init_options.mu_init)
+    end
+end
 # TODO: Linear solver options
 
 if args["solver"] == "madnlp"
