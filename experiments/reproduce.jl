@@ -66,11 +66,14 @@ function runtime_experiment(; old = false)
         model, formulation = get_model(modelname, nodes, layers)
         nlp = NLPModelsJuMP.MathOptNLPModel(model)
         for iterate_set in ("first", "last")
-            if iterate_set == "last" && (old || nodes == 2048)
-                continue
-            end
+            #if iterate_set == "last" && (old || nodes == 2048)
+            #    continue
+            #end
             iterates = load_iterates(model, modelname, nodes, layers, iterate_set)
             for LinearSolver in (MadNLPHSL.Ma57Solver, MadAI.SchurComplementSolver)
+                println("MODEL = $modelname")
+                println("$iterate_set $(length(iterates)) iterations")
+                println("LinearSolver = $LinearSolver")
                 opt_linear_solver = get_linear_solver_options(LinearSolver, model, formulation)
                 if old
                     madnlp_opt = get_linear_solver_options(
@@ -90,6 +93,7 @@ function runtime_experiment(; old = false)
                 for result in iterate_results
                     push!(target, merge(metadata, result))
                 end
+                display(iterate_results)
             end
         end
     end
