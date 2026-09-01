@@ -46,9 +46,9 @@ function iterate_to_kkt(madnlp::MadNLP.MadNLPSolver, iterate::Dict)
     # Form the augmented KKT system and its RHS.
     MadNLP.set_aug_diagonal!(MadNLP.get_kkt(madnlp), madnlp)
     MadNLP.jtprod!(MadNLP.get_jacl(madnlp), MadNLP.get_kkt(madnlp), MadNLP.get_y(madnlp))
-    #MadNLP.set_aug_rhs!(
-    #    madnlp, MadNLP.get_kkt(madnlp), MadNLP.get_c(madnlp), MadNLP.get_mu(madnlp),
-    #)
+    MadNLP.set_aug_rhs!(
+        madnlp, MadNLP.get_kkt(madnlp), MadNLP.get_c(madnlp), MadNLP.get_mu(madnlp),
+    )
     MadNLP.dual_inf_perturbation!(
         MadNLP.primal(MadNLP.get_p(madnlp)),
         MadNLP.get_ind_llb(madnlp),
@@ -63,7 +63,7 @@ function iterate_to_kkt(madnlp::MadNLP.MadNLPSolver, iterate::Dict)
         @assert length(regularized_diagonal) == size(madnlp_matrix, 1)
         madnlp_matrix[LinearAlgebra.diagind(madnlp_matrix)] .= regularized_diagonal
     end
-    rhs = MadNLP.primal_dual(MadNLP.get_p(madnlp))
+    rhs = copy(MadNLP.primal_dual(MadNLP.get_p(madnlp)))
     return madnlp_matrix, rhs
 end
 
@@ -150,7 +150,7 @@ function solve_kkt(nlp, LinearSolver, opt_linear_solver, iterates)
             sol,
             linear_solver,
             rhs;
-            max_iter = 20,
+            max_iter = 64,
             tol = 1e-5,
             full_matrix,
             tril_to_full_view,
