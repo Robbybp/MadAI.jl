@@ -21,7 +21,7 @@ function get_model(modelname, nnfile; kwds...)
     end
 end
 
-function get_model(modelname, nodes, layers, kwds...)
+function get_model(modelname, nodes, layers; kwds...)
     nn = get_nn(modelname, nodes, layers)
     dir = mktempdir()
     nnfile = joinpath(dir, "temp.pt")
