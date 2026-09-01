@@ -8,6 +8,7 @@ _shape(::MOI.VariableIndex) = JuMP.ScalarShape()
 _shape(::MOI.ScalarAffineFunction) = JuMP.ScalarShape()
 _shape(::MOI.ScalarQuadraticFunction) = JuMP.ScalarShape()
 _shape(::MOI.ScalarNonlinearFunction) = JuMP.ScalarShape()
+_shape(::MOI.VectorOfVariables) = JuMP.VectorShape()
 _shape(::MOI.VectorAffineFunction) = JuMP.VectorShape()
 _shape(::MOI.VectorQuadraticFunction) = JuMP.VectorShape()
 _shape(::MOI.VectorNonlinearFunction) = JuMP.VectorShape()
@@ -31,6 +32,7 @@ function get_con_indices(model::MOI.ModelLike)
     linear = Vector{MOI.ConstraintIndex}()
     quadratic = Vector{MOI.ConstraintIndex}()
     nonlinear = Vector{MOI.ConstraintIndex}()
+    oracle = Vector{MOI.ConstraintIndex}()
     contypes = MOI.get(model, MOI.ListOfConstraintTypesPresent())
     for (F, S) in contypes
         if F == MOI.VariableIndex
@@ -38,6 +40,8 @@ function get_con_indices(model::MOI.ModelLike)
         end
         indices = MOI.get(model, MOI.ListOfConstraintIndices{F,S}())
         for idx in indices
+            # Why am I branching on fcn and not F here. This loop is a bit more
+            # convoluted than it needs to be.
             fcn = MOI.get(model, MOI.ConstraintFunction(), idx)
             if fcn isa MOI.ScalarAffineFunction || fcn isa MOI.VectorAffineFunction
                 push!(linear, idx)
@@ -45,12 +49,14 @@ function get_con_indices(model::MOI.ModelLike)
                 push!(quadratic, idx)
             elseif fcn isa MOI.ScalarNonlinearFunction
                 push!(nonlinear, idx)
+            elseif fcn isa MOI.VectorOfVariables && S <: MOI.VectorNonlinearOracle
+                push!(oracle, idx)
             else
                 error("Unsupported constraint function $F")
             end
         end
     end
-    return (; linear, quadratic, nonlinear)
+    return (; linear, quadratic, nonlinear, oracle)
 end
 
 function get_var_con_order(
@@ -64,6 +70,15 @@ end
 
 function get_kkt_indices(model::JuMP.Model, variables::Vector, constraints::Vector)
     nlp = NLPModelsJuMP.MathOptNLPModel(model)
+    moimodel = JuMP.backend(model)
+    for con in constraints
+        fcn = MOI.get(moimodel, MOI.ConstraintFunction(), JuMP.index(con))
+        if fcn isa MOI.AbstractVectorFunction
+            throw(ArgumentError(
+                "get_kkt_indices does not support vector constraint $(JuMP.index(con))",
+            ))
+        end
+    end
     varorder, conorder = get_var_con_order(model)
     var_idx_map = Dict(var => i for (i, var) in enumerate(varorder))
     con_idx_map = Dict(con => i for (i, con) in enumerate(conorder))
