@@ -31,6 +31,7 @@ ARGS_WHEN_INCLUDED = Dict(
     "solver" => "madnlp",
     "linear-solver" => "ma57",
     "write-iterates" => 10,
+    "gray-box" => false,
 )
 
 function parse_commandline()
@@ -57,6 +58,9 @@ function parse_commandline()
             help = "Number of iterates to write. Default, 0, writes nothing."
             arg_type = Int
             default = 0
+        "--gray-box"
+            help = "Construct the gray-box model"
+            action = :store_true
     end
     args = ArgParse.parse_args(settings)
     args["solver"] = lowercase(args["solver"])
@@ -74,6 +78,7 @@ end
 
 function (cb::Callback)(solver::MadNLP.AbstractMadNLPSolver, mode)
     push!(cb.iterates, Dict{String,Any}(
+        # Does this contain primals + slacks???
         "primal" => copy(MadNLP.primal(MadNLP.get_x(solver))),
         "dual" => copy(MadNLP.get_y(solver)),
         "Ldual" => copy(MadNLP.primal(MadNLP.get_zl(solver))),
@@ -87,7 +92,7 @@ args = abspath(PROGRAM_FILE) == (@__FILE__) ? parse_commandline() : ARGS_WHEN_IN
 modelname = args["modelname"]
 nodes = args["nodes"]
 layers = args["layers"]
-model, formulation = get_model(modelname, nodes, layers)
+model, formulation = get_model(modelname, nodes, layers; gray_box = args["gray-box"])
 
 JuMP.set_optimizer(model, OPTIMIZER_LOOKUP[args["solver"]])
 JuMP.set_optimizer_attribute(model, "linear_solver", LINEAR_SOLVER_LOOKUP[args["solver"], args["linear-solver"]])
@@ -118,7 +123,8 @@ if args["write-iterates"] >= 1 && args["solver"] == "madnlp"
             "constraints" => string.(JuMP.index.(constraints)),
             "iterates" => iterates_to_write,
         )
-        fname = "$modelname-$(nodes)nodes$(layers)layers$(suffix).json"
+        gray_box_suffix = args["gray-box"] ? "-gb" : ""
+        fname = "$modelname-$(nodes)nodes$(layers)layers$(gray_box_suffix)$(suffix).json"
         println("Writing $n_iter iterates to $fname")
         fpath = joinpath(@__DIR__, "data", "iterates", fname)
         mkpath(dirname(fpath))
