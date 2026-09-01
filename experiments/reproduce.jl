@@ -1,4 +1,5 @@
 import ArgParse
+import CSV
 import DataFrames
 import JSON
 import JuMP
@@ -95,6 +96,25 @@ function runtime_experiment(; old = false)
     return first_results, last_results
 end
 
+function write_runtime_results(first_results, last_results; old = false)
+    results_dir = joinpath(@__DIR__, "results")
+    mkpath(results_dir)
+
+    function write_results(results, filename)
+        results_df = DataFrames.DataFrame(results)
+        results_df.LinearSolver = string.(results_df.LinearSolver)
+        CSV.write(joinpath(results_dir, filename), results_df)
+    end
+
+    if old
+        write_results(first_results, "runtime-first-old.csv")
+    else
+        write_results(first_results, "runtime-first.csv")
+        write_results(last_results, "runtime-last.csv")
+    end
+    return nothing
+end
+
 function summarize_results(results)
     isempty(results) && return DataFrames.DataFrame()
     results_df = DataFrames.DataFrame(results)
@@ -130,7 +150,9 @@ end
 function main()
     args = parse_commandline()
     if args["experiment"] == "runtime"
-        return runtime_experiment(; old = args["old"])
+        first_results, last_results = runtime_experiment(; old = args["old"])
+        write_runtime_results(first_results, last_results; old = args["old"])
+        return first_results, last_results
     end
     error("Unknown experiment: $(args["experiment"])")
 end
