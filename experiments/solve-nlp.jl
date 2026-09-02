@@ -29,13 +29,35 @@ const INIT_FROM_GB_OPTIONS = Dict(
     ("mnist", 512, 4) => (; mu_init = 1e-2, bound_push = 1e-2),
     ("mnist", 1024, 4) => (; mu_init = 7e-4, bound_push = 1e2),
     ("mnist", 2048, 4) => (; mu_init = 1e-3, bound_push = 1e-3),
+    ("scopf", 500, 5) => (; mu_init = 1e-4, bound_push = 1e-4, tol = 1e-6),
+    ("scopf", 1000, 7) => (; mu_init = 1e-6, bound_push = 1e-6, tol = 1e-6),
+    ("scopf", 1500, 10) => (; mu_init = 1e-6, bound_push = 1e-6, tol = 1e-6),
+)
+const OPT_LOOKUP = Dict(
+    # Metis or exact minimum degree croak on these matrices.
+    #
+    # MA57 (in HSL_jll) is compiled against LBT. So number of threads for L3 BLAS should
+    # be controlled by lbt_set_num_threads above.
+    ("madnlp", "ma27") => MadNLP.default_options(MadNLPHSL.Ma27Solver),
+    ("madnlp", "ma57") => MadNLPHSL.Ma57Options(; ma57_pivot_order = 2), # In MA57, 2=AMD
+    # I don't set ma86_num_threads because I'm not interested in benchmarking here. I'm just interested
+    # in speed.
+    ("madnlp", "ma86") => MadNLPHSL.Ma86Options(; ma86_order = MadNLPHSL.AMD), # ma86_num_threads = 1),
+    ("madnlp", "ma97") => MadNLPHSL.Ma97Options(; ma97_order = MadNLPHSL.AMD), # ma97_num_threads = 1),
+    ("ipopt", "ma27") => (;),
+    ("ipopt", "ma57") => (; ma57_pivot_order = 2),
+    ("ipopt", "ma86") => (; ma86_order = "amd"),
+)
+const LINEAR_SOLVER_BY_PROBLEM = Dict(
+    "mnist" => "ma57",
+    "scopf" => "ma86",
 )
 ARGS_WHEN_INCLUDED = Dict(
     "modelname" => "mnist",
     "nodes" => 128,
     "layers" => 4,
     "solver" => "madnlp",
-    "linear-solver" => "ma57",
+    "linear-solver" => nothing,
     "write-iterates" => 10,
     "gray-box" => false,
     "initialize-from-gb" => false,
@@ -61,8 +83,7 @@ function parse_commandline()
             help = "NLP solver: madnlp or ipopt"
             default = "ipopt"
         "--linear-solver"
-            help = "HSL linear solver: ma27, ma57, or ma86"
-            default = "ma57"
+            help = "HSL linear solver: ma27, ma57, or ma86 (default is model dependent)"
         "--write-iterates"
             help = "Number of iterates to write. Default, 0, writes nothing."
             arg_type = Int
@@ -82,7 +103,11 @@ function parse_commandline()
     end
     args = ArgParse.parse_args(settings)
     args["solver"] = lowercase(args["solver"])
-    args["linear-solver"] = lowercase(args["linear-solver"])
+    if args["linear-solver"] === nothing
+        args["linear-solver"] = LINEAR_SOLVER_BY_PROBLEM[args["modelname"]]
+    else
+        args["linear-solver"] = lowercase(args["linear-solver"])
+    end
     if args["solver"] ∉ ("madnlp", "ipopt")
         error("Unknown solver: $(args["solver"])")
     end
@@ -122,11 +147,14 @@ function get_xstart_from_gb(modelname, nodes, layers)
 end
 
 args = abspath(PROGRAM_FILE) == (@__FILE__) ? parse_commandline() : ARGS_WHEN_INCLUDED
-println("ARGS:")
-display(args)
 modelname = args["modelname"]
 nodes = args["nodes"]
 layers = args["layers"]
+if args["linear-solver"] === nothing
+    args["linear-solver"] = LINEAR_SOLVER_BY_PROBLEM[modelname]
+end
+println("ARGS:")
+display(args)
 xstart = args["initialize-from-gb"] ? get_xstart_from_gb(modelname, nodes, layers) : nothing
 model, formulation = get_model(
     modelname, nodes, layers; gray_box = args["gray-box"], xstart,
@@ -134,12 +162,19 @@ model, formulation = get_model(
 
 JuMP.set_optimizer(model, OPTIMIZER_LOOKUP[args["solver"]])
 JuMP.set_optimizer_attribute(model, "linear_solver", LINEAR_SOLVER_LOOKUP[args["solver"], args["linear-solver"]])
+linear_solver_options = OPT_LOOKUP[args["solver"], args["linear-solver"]]
+for field in fieldnames(typeof(linear_solver_options))
+    JuMP.set_optimizer_attribute(model, string(field), getproperty(linear_solver_options, field))
+end
 JuMP.set_optimizer_attributes(model, "max_iter" => 3000)
 if args["initialize-from-gb"]
     init_options = INIT_FROM_GB_OPTIONS[(modelname, nodes, layers)]
     #mu_init = something(args["mu-init"], init_options.mu_init)
     #bound_push = something(args["bound-push"], init_options.bound_push)
     JuMP.set_optimizer_attribute(model, "bound_push", init_options.bound_push)
+    if :tol in fieldnames(typeof(init_options))
+        JuMP.set_optimizer_attribute(model, "tol", init_options.tol)
+    end
     if args["solver"] == "madnlp"
         JuMP.set_optimizer_attribute(model, "barrier", MadNLP.MonotoneUpdate(; init_options.mu_init))
     elseif args["solver"] == "ipopt"
