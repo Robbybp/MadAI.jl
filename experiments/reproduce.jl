@@ -107,7 +107,9 @@ function write_runtime_results(first_results, last_results; old = false)
     function write_results(results, filename)
         results_df = DataFrames.DataFrame(results)
         results_df.LinearSolver = string.(results_df.LinearSolver)
-        CSV.write(joinpath(results_dir, filename), results_df)
+        fpath = joinpath(results_dir, filename)
+        println("Saving results to $fpath")
+        CSV.write(fpath, results_df)
     end
 
     if old
@@ -122,12 +124,13 @@ end
 function summarize_results(results)
     isempty(results) && return DataFrames.DataFrame()
     results_df = DataFrames.DataFrame(results)
-    aggregate_columns = [:t_factorize, :t_solve, :residual, :refine_iter, :refine_success]
+    aggregate_columns = [:t_init, :t_factorize, :t_solve, :residual, :refine_iter, :refine_success]
     group_columns = setdiff(propertynames(results_df), aggregate_columns)
     summary = DataFrames.combine(
         DataFrames.groupby(results_df, group_columns),
         DataFrames.nrow => :n_iterates,
         :refine_success => sum => :refine_success,
+        :t_init => Statistics.mean => :t_init,
         :t_factorize => sum => :t_factorize,
         :t_solve => sum => :t_solve,
         :residual => Statistics.mean => :residual,
@@ -135,14 +138,16 @@ function summarize_results(results)
     )
 
     key(row) = (row.modelname, row.nodes, row.layers)
-    is_baseline(row) = row.LinearSolver in (MadNLPHSL.Ma57Solver, MadNLPHSL.Ma86Solver)
+    is_baseline(row) = string(row.LinearSolver) in (
+        string(MadNLPHSL.Ma57Solver), string(MadNLPHSL.Ma86Solver),
+    )
     baseline_times = Dict(
         key(row) => (row.t_factorize + row.t_solve) / row.n_iterates
         for row in DataFrames.eachrow(summary) if is_baseline(row)
     )
     speedup = fill(NaN, DataFrames.nrow(summary))
     for (i, row) in enumerate(DataFrames.eachrow(summary))
-        if row.LinearSolver === MadAI.SchurComplementSolver
+        if string(row.LinearSolver) == string(MadAI.SchurComplementSolver)
             schur_time = (row.t_factorize + row.t_solve) / row.n_iterates
             speedup[i] = get(baseline_times, key(row), NaN) / schur_time
         end
@@ -169,4 +174,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
     println("Last iterates")
     println("-------------")
     display(summarize_results(last_results))
+    println("Combined iterates")
+    println("-----------------")
+    display(summarize_results(vcat(first_results, last_results)))
 end
