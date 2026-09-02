@@ -1,7 +1,12 @@
 import PythonCall
 torch = PythonCall.pyimport("torch")
+
 module MNIST
 include("mnist.jl")
+end
+
+module SCOPF
+include("scopf/scopf.jl")
 end
 
 # This is only necessary for the method where we construct straight from
@@ -16,6 +21,9 @@ function get_model(modelname, nnfile; kwds...)
             kwds...
         )
         return m, formulation
+    elseif lowercase(modelname) == "scopf"
+        m, formulation = SCOPF.get_scopf_model(nnfile; kwds...)
+        return m, formulation
     else
         error("Unrecognized model name: $modelname")
     end
@@ -24,7 +32,7 @@ end
 function get_model(modelname, nodes, layers; kwds...)
     nn = get_nn(modelname, nodes, layers)
     dir = mktempdir()
-    nnfile = joinpath(dir, "temp.pt")
+    nnfile = joinpath(dir, "temp-$modelname-nn.pt")
     println("Temporarily saving full NN model to $nnfile")
     torch.save(nn, nnfile)
     return get_model(modelname, nnfile; kwds...)
