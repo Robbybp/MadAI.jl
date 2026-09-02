@@ -22,7 +22,9 @@ function parse_commandline()
         "--old"
             help = "Use the old KKT-construction method"
             action = :store_true
-            default = false
+        "--dry-run"
+            help = "Run the experiment without writing result files"
+            action = :store_true
     end
     return ArgParse.parse_args(settings)
 end
@@ -58,11 +60,16 @@ function load_iterates(model, modelname, nodes, layers, iterate_set)
     return iterate_data["iterates"]
 end
 
+const NN_BY_MODEL = Dict(
+    "mnist" => [(512, 4), (1024, 4), (2048, 4)],
+    "scopf" => [(500, 5), (1000, 7)],#, (1500, 10)],
+)
+
 function runtime_experiment(; old = false)
     first_results = NamedTuple[]
     last_results = NamedTuple[]
-    for modelname in ("mnist",),
-        (nodes, layers) in ((512, 4), (1024, 4), (2048, 4))
+    for modelname in ("scopf",),#["mnist", "scopf"],
+        (nodes, layers) in NN_BY_MODEL[modelname]
         model, formulation = get_model(modelname, nodes, layers)
         nlp = NLPModelsJuMP.MathOptNLPModel(model)
         for iterate_set in ("first", "last")
@@ -160,7 +167,11 @@ function main()
     args = parse_commandline()
     if args["experiment"] == "runtime"
         first_results, last_results = runtime_experiment(; old = args["old"])
-        write_runtime_results(first_results, last_results; old = args["old"])
+        if args["dry-run"]
+            println("Dry run: not writing result files")
+        else
+            write_runtime_results(first_results, last_results; old = args["old"])
+        end
         return first_results, last_results
     end
     error("Unknown experiment: $(args["experiment"])")
