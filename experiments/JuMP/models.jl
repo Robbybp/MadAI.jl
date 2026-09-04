@@ -23,6 +23,15 @@ function get_model(modelname, nnfile; kwds...)
         return m, formulation
     elseif lowercase(modelname) == "scopf"
         m, formulation = SCOPF.get_scopf_model(nnfile; kwds...)
+        pivot_vars, _ = MadAI.get_vars_cons(formulation)
+        for var in pivot_vars
+            # Pivot vars should not be fixed (they must exist in the KKT system),
+            # so, if they are, we relax the bounds.
+            if JuMP.has_lower_bound(var) && JuMP.has_upper_bound(var) && JuMP.lower_bound(var) == JuMP.upper_bound(var)
+                JuMP.set_lower_bound(var, JuMP.lower_bound(var) - 1e-6)
+                JuMP.set_upper_bound(var, JuMP.upper_bound(var) + 1e-6)
+            end
+        end
         return m, formulation
     else
         error("Unrecognized model name: $modelname")
