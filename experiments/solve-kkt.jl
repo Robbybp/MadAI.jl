@@ -70,8 +70,14 @@ end
 function solve_kkt(nlp, LinearSolver, opt_linear_solver, iterates)
     # NOTE: MadNLP is initialized with a linear solver, but this solver is only
     # used to construct the KKT matrix.
-    madnlp = MadNLP.MadNLPSolver(nlp)
+    # The worst thing that happens here is that the linear solver has long
+    # initialization time. I think MA57 has good initialization time by default
+    # on all instances.
+    println("INITIALIZING MADNLP")
+    _t = time()
+    madnlp = MadNLP.MadNLPSolver(nlp; linear_solver = MadNLPHSL.Ma57Solver)
     MadNLP.initialize!(madnlp)
+    println("TIME TO INITIALIZE MADNLP: $(time() - _t)")
 
     matrix = MadNLP.get_kkt(MadNLP.get_kkt(madnlp))
     _t = time()
