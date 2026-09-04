@@ -65,6 +65,21 @@ const NN_BY_MODEL = Dict(
     "scopf" => [(500, 5), (1000, 7)],#, (1500, 10)],
 )
 
+function precompile_runtime_experiment()
+    modelname = "mnist"
+    nodes, layers = 128, 4
+    model, formulation = get_model(modelname, nodes, layers)
+    nlp = NLPModelsJuMP.MathOptNLPModel(model)
+    iterates = load_iterates(model, modelname, nodes, layers, "first")[1:1]
+
+    println("Precompiling KKT solvers on MNIST $(nodes)-node, $(layers)-layer model")
+    for LinearSolver in (MadNLPHSL.Ma57Solver, MadAI.SchurComplementSolver)
+        opt_linear_solver = get_linear_solver_options(LinearSolver, model, formulation)
+        solve_kkt(nlp, LinearSolver, opt_linear_solver, iterates)
+    end
+    return nothing
+end
+
 function runtime_experiment(; old = false)
     first_results = NamedTuple[]
     last_results = NamedTuple[]
@@ -166,6 +181,7 @@ end
 function main()
     args = parse_commandline()
     if args["experiment"] == "runtime"
+        precompile_runtime_experiment()
         first_results, last_results = runtime_experiment(; old = args["old"])
         if args["dry-run"]
             println("Dry run: not writing result files")
