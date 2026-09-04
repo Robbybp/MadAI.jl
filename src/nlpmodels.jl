@@ -79,6 +79,13 @@ function get_kkt_indices(model::JuMP.Model, variables::Vector, constraints::Vect
             ))
         end
     end
+    for var in variables
+        if JuMP.has_upper_bound(var) && JuMP.has_lower_bound(var) && JuMP.lower_bound == JuMP.upper_bound
+            throw(ArgumentError(
+                "Cannot get the KKT index of fixed variable $var",
+            ))
+        end
+    end
     varorder, conorder = get_var_con_order(model)
     var_idx_map = Dict(var => i for (i, var) in enumerate(varorder))
     con_idx_map = Dict(con => i for (i, con) in enumerate(conorder))
