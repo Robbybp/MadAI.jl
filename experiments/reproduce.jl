@@ -8,6 +8,10 @@ import MadNLP
 import MadNLPHSL
 import NLPModelsJuMP
 import Statistics
+import LinearAlgebra
+
+LinearAlgebra.BLAS.set_num_threads(1)
+LinearAlgebra.BLAS.lbt_set_num_threads(1)
 
 include("solve-kkt.jl")
 include("solve-kkt-old.jl")
@@ -29,9 +33,19 @@ function parse_commandline()
     return ArgParse.parse_args(settings)
 end
 
+const HSL_SOLVER_BY_MODEL = Dict(
+    "mnist" => MadNLPHSL.Ma57Solver,
+    "scopf" => MadNLPHSL.Ma86Solver,
+)
+
+const HSL_OPTIONS_LOOKUP = Dict(
+    MadNLPHSL.Ma57Solver => MadNLPHSL.Ma57Options(; ma57_pivot_order = 2), # AMD
+    MadNLPHSL.Ma86Solver => MadNLPHSL.Ma86Options(; ma86_order = MadNLPHSL.AMD, ma86_num_threads = 1),
+)
+
 function get_linear_solver_options(LinearSolver, model, formulation)
-    if LinearSolver === MadNLPHSL.Ma57Solver
-        return MadNLP.default_options(LinearSolver)
+    if LinearSolver in values(HSL_SOLVER_BY_MODEL)
+        return HSL_OPTIONS_LOOKUP[LinearSolver]
     end
 
     pivot_vars, pivot_cons = MadAI.get_vars_cons(formulation)
@@ -61,8 +75,16 @@ function load_iterates(model, modelname, nodes, layers, iterate_set)
 end
 
 const NN_BY_MODEL = Dict(
-    "mnist" => [(512, 4), (1024, 4), (2048, 4)],
-    "scopf" => [(500, 5), (1000, 7)],#, (1500, 10)],
+    "mnist" => [
+        (512, 4),
+        (1024, 4),
+        (2048, 4),
+    ],
+    "scopf" => [
+        (500, 5),
+        (1000, 7),
+        (1500, 10),
+    ],
 )
 
 function precompile_runtime_experiment()
@@ -73,7 +95,7 @@ function precompile_runtime_experiment()
     iterates = load_iterates(model, modelname, nodes, layers, "first")[1:1]
 
     println("Precompiling KKT solvers on MNIST $(nodes)-node, $(layers)-layer model")
-    for LinearSolver in (MadNLPHSL.Ma57Solver, MadAI.SchurComplementSolver)
+    for LinearSolver in (HSL_SOLVER_BY_MODEL[modelname], MadAI.SchurComplementSolver)
         opt_linear_solver = get_linear_solver_options(LinearSolver, model, formulation)
         solve_kkt(nlp, LinearSolver, opt_linear_solver, iterates)
     end
@@ -83,7 +105,7 @@ end
 function runtime_experiment(; old = false)
     first_results = NamedTuple[]
     last_results = NamedTuple[]
-    for modelname in ("scopf",),#["mnist", "scopf"],
+    for modelname in ["mnist", "scopf"],
         (nodes, layers) in NN_BY_MODEL[modelname]
         model, formulation = get_model(modelname, nodes, layers)
         nlp = NLPModelsJuMP.MathOptNLPModel(model)
@@ -92,7 +114,7 @@ function runtime_experiment(; old = false)
             #    continue
             #end
             iterates = load_iterates(model, modelname, nodes, layers, iterate_set)
-            for LinearSolver in (MadNLPHSL.Ma57Solver, MadAI.SchurComplementSolver)
+            for LinearSolver in (HSL_SOLVER_BY_MODEL[modelname], MadAI.SchurComplementSolver)
                 println("MODEL = $modelname")
                 println("$iterate_set $(length(iterates)) iterations")
                 println("LinearSolver = $LinearSolver")
