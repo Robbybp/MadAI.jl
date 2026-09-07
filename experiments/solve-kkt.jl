@@ -67,7 +67,14 @@ function iterate_to_kkt(madnlp::MadNLP.MadNLPSolver, iterate::Dict)
     return madnlp_matrix, rhs
 end
 
-function solve_kkt(nlp, LinearSolver, opt_linear_solver, iterates)
+function solve_kkt(
+    nlp,
+    LinearSolver,
+    opt_linear_solver,
+    iterates;
+    MadNLPLinearSolver::Type{<:MadNLP.AbstractLinearSolver} = MadNLPHSL.Ma57Solver,
+    kwds...,
+)
     # NOTE: MadNLP is initialized with a linear solver, but this solver is only
     # used to construct the KKT matrix.
     # The worst thing that happens here is that the linear solver has long
@@ -75,7 +82,7 @@ function solve_kkt(nlp, LinearSolver, opt_linear_solver, iterates)
     # on all instances.
     println("INITIALIZING MADNLP")
     _t = time()
-    madnlp = MadNLP.MadNLPSolver(nlp; linear_solver = MadNLPHSL.Ma57Solver)
+    madnlp = MadNLP.MadNLPSolver(nlp; linear_solver = MadNLPLinearSolver, kwds...)
     MadNLP.initialize!(madnlp)
     println("TIME TO INITIALIZE MADNLP: $(time() - _t)")
 
