@@ -1,7 +1,7 @@
 using JuMP
 import PGLib
 import PowerModels
-import HDF5: h5open
+#import HDF5: h5open
 import PythonCall
 import MathOptAI
 import Ipopt
@@ -640,6 +640,7 @@ function get_maxls_model(
     xstart::Union{Nothing,Dict} = nothing,
     gray_box::Bool = false,
 )
+    @assert !normalize
     #if hot_start == true
     #    # first, get the nominal line status
     #    zl0, logit_zl0 = line_status(gm, bounds, nn_model; high_load=true)
@@ -698,14 +699,15 @@ function get_maxls_model(
 
     # now, we need to normalize the nn input
     if normalize
-        normalization_data = nn_model[1:findlast(==('_'), nn_model)]*"normalization_values.h5"
-        fid   = h5open(normalization_data, "r")
-        mean  = read(fid, "mean")
-        std   = read(fid, "std")
-        close(fid)
-        #xn = (x .- mean)./(std)
-        # Add explicit variables for normalization. Otherwise models structures
-        # are slightly different in both formulations.
+        error("Normalization is no longer supported")
+        #normalization_data = nn_model[1:findlast(==('_'), nn_model)]*"normalization_values.h5"
+        #fid   = h5open(normalization_data, "r")
+        #mean  = read(fid, "mean")
+        #std   = read(fid, "std")
+        #close(fid)
+        ##xn = (x .- mean)./(std)
+        ## Add explicit variables for normalization. Otherwise models structures
+        ## are slightly different in both formulations.
     else
         mean = zeros(length(x))
         std = ones(length(x))
