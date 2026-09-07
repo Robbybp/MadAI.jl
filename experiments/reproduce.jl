@@ -239,8 +239,8 @@ function flops_experiment()
         model, formulation = get_model(modelname, nodes, layers)
         nlp = NLPModelsJuMP.MathOptNLPModel(model)
         iterates = vcat(
-            load_iterates(model, modelname, nodes, layers, "first")[1:2],
-            #load_iterates(model, modelname, nodes, layers, "last"),
+            load_iterates(model, modelname, nodes, layers, "first"),
+            load_iterates(model, modelname, nodes, layers, "last"),
         )
         HSLLinearSolver = HSL_SOLVER_BY_MODEL[modelname]
         hsl_options = get_linear_solver_options(HSLLinearSolver, model, formulation)
