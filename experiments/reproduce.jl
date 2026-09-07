@@ -36,6 +36,7 @@ end
 const HSL_SOLVER_BY_MODEL = Dict(
     "mnist" => MadNLPHSL.Ma57Solver,
     "scopf" => MadNLPHSL.Ma86Solver,
+    "lsv" => MadNLPHSL.Ma86Solver,
 )
 
 const HSL_OPTIONS_LOOKUP = Dict(
@@ -63,6 +64,7 @@ end
 
 function load_iterates(model, modelname, nodes, layers, iterate_set)
     fname = "$modelname-$(nodes)nodes$(layers)layers-$iterate_set.json"
+    println("Reading iterates from $fname")
     fpath = joinpath(@__DIR__, "data", "iterates", fname)
     iterate_data = open(fpath, "r") do io
         JSON.parse(io)
@@ -85,6 +87,12 @@ const NN_BY_MODEL = Dict(
         (1000, 7),
         (1500, 10),
     ],
+    "lsv" => [
+        #(32, 3),
+        (128, 3),
+        (512, 3),
+        (2048, 3),
+    ]
 )
 
 function precompile_runtime_experiment()
@@ -105,7 +113,7 @@ end
 function runtime_experiment(; old = false)
     first_results = NamedTuple[]
     last_results = NamedTuple[]
-    for modelname in ["mnist", "scopf"],
+    for modelname in ["mnist", "scopf", "lsv"],
         (nodes, layers) in NN_BY_MODEL[modelname]
         model, formulation = get_model(modelname, nodes, layers)
         nlp = NLPModelsJuMP.MathOptNLPModel(model)
@@ -129,7 +137,9 @@ function runtime_experiment(; old = false)
                         nlp, LinearSolver, opt_linear_solver, iterates; madnlp_opt,
                     )
                 else
-                    iterate_results = solve_kkt(nlp, LinearSolver, opt_linear_solver, iterates)
+                    # MA57 hits an Int32 overflow with the largest MA86 model
+                    MadNLPLinearSolver = modelname == "lsv" ? MadNLPHSL.Ma86Solver : MadNLPHSL.Ma57Solver
+                    iterate_results = solve_kkt(nlp, LinearSolver, opt_linear_solver, iterates; MadNLPLinearSolver, ma86_order = MadNLPHSL.AMD)
                 end
 
                 metadata = (; nodes, layers, modelname, LinearSolver)
