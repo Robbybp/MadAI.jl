@@ -32,6 +32,7 @@ const INIT_FROM_GB_OPTIONS = Dict(
     ("scopf", 500, 5) => (; mu_init = 1e-4, bound_push = 1e-4, tol = 1e-6),
     ("scopf", 1000, 7) => (; mu_init = 1e-6, bound_push = 1e-6, tol = 1e-6),
     ("scopf", 1500, 10) => (; mu_init = 1e-6, bound_push = 1e-6, tol = 1e-6),
+    ("lsv", 2048, 3) => (; mu_init = 1e-6, bound_push = 1e-6, tol = 1e-6),
 )
 const OPT_LOOKUP = Dict(
     # Metis or exact minimum degree croak on these matrices.
@@ -51,6 +52,7 @@ const OPT_LOOKUP = Dict(
 const LINEAR_SOLVER_BY_PROBLEM = Dict(
     "mnist" => "ma57",
     "scopf" => "ma86",
+    "lsv" => "ma86",
 )
 ARGS_WHEN_INCLUDED = Dict(
     "modelname" => "mnist",
@@ -166,7 +168,9 @@ linear_solver_options = OPT_LOOKUP[args["solver"], args["linear-solver"]]
 for field in fieldnames(typeof(linear_solver_options))
     JuMP.set_optimizer_attribute(model, string(field), getproperty(linear_solver_options, field))
 end
-JuMP.set_optimizer_attributes(model, "max_iter" => 3000)
+#JuMP.set_optimizer_attributes(model, "max_iter" => 3000)
+JuMP.set_optimizer_attributes(model, "max_iter" => 6000)
+JuMP.set_optimizer_attributes(model, "tol" => 1e-6)
 if args["initialize-from-gb"]
     init_options = INIT_FROM_GB_OPTIONS[(modelname, nodes, layers)]
     #mu_init = something(args["mu-init"], init_options.mu_init)
