@@ -13,6 +13,11 @@ _shape(::MOI.VectorAffineFunction) = JuMP.VectorShape()
 _shape(::MOI.VectorQuadraticFunction) = JuMP.VectorShape()
 _shape(::MOI.VectorNonlinearFunction) = JuMP.VectorShape()
 
+"""This is the variable/constraint ordering used by MathOptNLPModel,
+which is inherited by MadNLP. However, this ordering does not apply
+MadNLP's fixed variable treatment, which (as of v0.9.0) removes fixed
+variables from the variable vector.
+"""
 function get_var_con_order(
     model::JuMP.Model
 )::Tuple{Vector{JuMP.VariableRef}, Vector{JuMP.ConstraintRef}}
@@ -68,7 +73,14 @@ function get_var_con_order(
     return var_indices, con_indices
 end
 
-function get_kkt_indices(model::JuMP.Model, variables::Vector, constraints::Vector)
+function get_kkt_indices(
+    model::JuMP.Model,
+    variables::Vector,
+    constraints::Vector;
+    fixed_variable_treatment = MadNLP.MakeParameter,
+)
+    # I just want to be clear that this only works for the MakeParameter option
+    @assert fixed_variable_treatment === MadNLP.MakeParameter
     nlp = NLPModelsJuMP.MathOptNLPModel(model)
     moimodel = JuMP.backend(model)
     for con in constraints
@@ -79,26 +91,30 @@ function get_kkt_indices(model::JuMP.Model, variables::Vector, constraints::Vect
             ))
         end
     end
+    is_fixed = x -> JuMP.has_upper_bound(x) && JuMP.has_lower_bound(x) && JuMP.lower_bound(x) == JuMP.upper_bound(x)
     for var in variables
-        if JuMP.has_upper_bound(var) && JuMP.has_lower_bound(var) && JuMP.lower_bound == JuMP.upper_bound
+        if is_fixed(var)
             throw(ArgumentError(
                 "Cannot get the KKT index of fixed variable $var",
             ))
         end
     end
     varorder, conorder = get_var_con_order(model)
-    var_idx_map = Dict(var => i for (i, var) in enumerate(varorder))
+    # All our pivot variables, i.e., the only ones we need indices for,
+    # are in unfixed_vars
+    unfixed_vars = filter(x -> !is_fixed(x), varorder)
+    var_idx_map = Dict(var => i for (i, var) in enumerate(unfixed_vars))
     con_idx_map = Dict(con => i for (i, con) in enumerate(conorder))
     vindices = [var_idx_map[v] for v in variables]
     cindices = [con_idx_map[c] for c in constraints]
     # As of MadNLP 0.9.0, the constraint indices are stored on the callback
     # rather than in a separate data structure
+    # This is due to MadNLP PR https://github.com/madsuite-org/MadNLP.jl/pull/360,
+    # which also removes fixed variables (with equal LB and UB) from the KKT system.
     #ind_cons = MadNLP.get_index_constraints(nlp)
     cb = MadNLP.create_callback(MadNLP.SparseCallback, nlp)
-    nvar = length(varorder)
-    ncon = length(conorder)
+    nvar = length(unfixed_vars)
     nslack = length(cb.ind_ineq)
-    kkt_dim = nvar + ncon + nslack
     kkt_vindices = vindices
     kkt_cindices = cindices .+ (nvar + nslack)
     kkt_indices = vcat(kkt_vindices, kkt_cindices)
