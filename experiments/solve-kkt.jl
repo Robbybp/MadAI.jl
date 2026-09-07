@@ -1,6 +1,7 @@
 import JSON
 import SparseArrays
 import LinearAlgebra
+import Statistics
 import JuMP
 import NLPModelsJuMP
 import MadNLP
@@ -9,6 +10,105 @@ import MadAI
 
 function MadNLP.solve!(solver::MadNLP.AbstractLinearSolver, rhs::Vector)
     return MadNLP.solve_linear_system!(solver, rhs)
+end
+
+function _hsl_factorization_data(solver::MadNLPHSL.Ma57Solver)
+    return (; factor_size = solver.info[14], flops = solver.rinfo[3] + solver.rinfo[4],
+        n2by2 = solver.info[22], status_code = solver.info[1])
+end
+
+function _hsl_factorization_data(solver::MadNLPHSL.Ma86Solver)
+    return (; factor_size = solver.info.num_factor, flops = solver.info.num_flops,
+        n2by2 = solver.info.num_two, status_code = solver.info.flag)
+end
+
+function _schur_rhs(solver::MadAI.SchurComplementSolver, rhs)
+    dim = solver.csc.n
+    pivot_indices = solver.pivot_indices
+    pivot_index_set = Set(pivot_indices)
+    reduced_indices = filter(i -> !(i in pivot_index_set), 1:dim)
+    B = solver.csc[pivot_indices, reduced_indices] + solver.csc[reduced_indices, pivot_indices]'
+
+    pivot_rhs = copy(rhs[pivot_indices])
+    MadNLP.solve!(solver.pivot_solver, pivot_rhs)
+    return rhs[reduced_indices] - B' * pivot_rhs
+end
+
+function _pivot_rhs(solver::MadAI.SchurComplementSolver, rhs)
+    dim = solver.csc.n
+    pivot_indices = solver.pivot_indices
+    pivot_index_set = Set(pivot_indices)
+    reduced_indices = filter(i -> !(i in pivot_index_set), 1:dim)
+    B = solver.csc[pivot_indices, reduced_indices] + solver.csc[reduced_indices, pivot_indices]'
+
+    reduced_solution = _schur_rhs(solver, rhs)
+    MadNLP.solve!(solver.reduced_solver, reduced_solution)
+    return rhs[pivot_indices] - B * reduced_solution
+end
+
+function _factorize_and_refine!(solver, matrix, rhs)
+    solver.csc.nzval .= matrix.nzval
+    _t = time()
+    MadNLP.factorize!(solver)
+    t_factorize = time() - _t
+
+    solution = copy(rhs)
+    full_matrix, tril_to_full_view = MadNLP.get_tril_to_full(matrix)
+    _t = time()
+    MadNLP.solve!(solver, solution)
+    refine_result = MadAI.refine!(solution, solver, rhs;
+        max_iter = 64, tol = 1e-8, full_matrix, tril_to_full_view)
+    t_solve = time() - _t
+    residual = maximum(abs.(full_matrix * solution - rhs))
+
+    return merge((;
+        dim = matrix.m,
+        nnz = SparseArrays.nnz(matrix),
+        t_factorize,
+        t_solve,
+        residual,
+        refine_success = refine_result.success,
+        refine_iter = refine_result.iterations,
+    ), _hsl_factorization_data(solver))
+end
+
+function benchmark_kkt_matrices(
+    nlp,
+    HSLLinearSolver::Type{<:MadNLP.AbstractLinearSolver},
+    hsl_options,
+    schur_options,
+    iterates;
+    kwds...,
+)
+    madnlp = MadNLP.MadNLPSolver(nlp; linear_solver = HSLLinearSolver, kwds...)
+    MadNLP.initialize!(madnlp)
+    kkt_matrix = MadNLP.get_kkt(MadNLP.get_kkt(madnlp))
+    schur_solver = MadAI.SchurComplementSolver(kkt_matrix; opt = schur_options)
+    hsl_solvers = Dict{Symbol,Any}()
+    results = NamedTuple[]
+
+    for (i, iterate) in enumerate(iterates)
+        println("BENCHMARKING KKT MATRICES FOR ITERATE $i")
+        matrix, rhs = iterate_to_kkt(madnlp, Dict(iterate))
+        schur_solver.csc.nzval .= matrix.nzval
+        MadNLP.factorize!(schur_solver)
+
+        pivot_matrix = schur_solver.pivot_solver.csc
+        schur_matrix = schur_solver.reduced_solver.csc
+        matrix_rhs = (
+            kkt = (matrix, rhs),
+            pivot = (pivot_matrix, _pivot_rhs(schur_solver, rhs)),
+            schur = (schur_matrix, _schur_rhs(schur_solver, rhs)),
+        )
+        for (matrix_type, (submatrix, subrhs)) in pairs(matrix_rhs)
+            solver = get!(hsl_solvers, matrix_type) do
+                HSLLinearSolver(submatrix; opt = hsl_options)
+            end
+            push!(results, merge((; iterate = i, matrix_type),
+                _factorize_and_refine!(solver, submatrix, subrhs)))
+        end
+    end
+    return results
 end
 
 function iterate_to_kkt(nlp::NLPModelsJuMP.MathOptNLPModel, iterate::Dict)
@@ -142,6 +242,81 @@ function solve_kkt(
         )
     end
     return results
+end
+
+function profile_schur(
+    nlp,
+    opt_linear_solver,
+    iterates;
+    MadNLPLinearSolver::Type{<:MadNLP.AbstractLinearSolver} = MadNLPHSL.Ma57Solver,
+    kwds...,
+)
+    madnlp = MadNLP.MadNLPSolver(nlp; linear_solver = MadNLPLinearSolver, kwds...)
+    MadNLP.initialize!(madnlp)
+
+    matrix = MadNLP.get_kkt(MadNLP.get_kkt(madnlp))
+    linear_solver = MadAI.SchurComplementSolver(matrix; opt = opt_linear_solver)
+    full_matrix, tril_to_full_view = MadNLP.get_tril_to_full(matrix)
+
+    t_factorize = 0.0
+    t_solve = 0.0
+    t_resid = 0.0
+    residuals = Float64[]
+    refine_iterations = Int[]
+    refine_success = true
+    for (i, iterate) in enumerate(iterates)
+        println("PROFILING SCHUR SOLVER FOR ITERATE $i")
+        madnlp_matrix, rhs = iterate_to_kkt(madnlp, Dict(iterate))
+        linear_solver.csc.nzval .= madnlp_matrix.nzval
+
+        _t = time()
+        MadNLP.factorize!(linear_solver)
+        t_factorize += time() - _t
+
+        sol = copy(rhs)
+        _t = time()
+        MadNLP.solve!(linear_solver, sol)
+        refine_res = MadAI.refine!(
+            sol,
+            linear_solver,
+            rhs;
+            max_iter = 64,
+            tol = 1e-8,
+            full_matrix,
+            tril_to_full_view,
+        )
+        t_solve += time() - _t
+        t_resid += refine_res.t_resid
+        push!(residuals, maximum(abs.(full_matrix * sol - rhs)))
+        push!(refine_iterations, refine_res.iterations)
+        refine_success &= refine_res.success
+    end
+
+    timer = linear_solver.timer
+    factorize_schur = timer.factorize.reduced
+    factorize_pivot = timer.factorize.pivot
+    construct_schur = timer.factorize.solve + timer.factorize.multiply
+    solve_schur = timer.solve_timer.solve_schur
+    solve_pivot = timer.solve_timer.solve_pivot
+    compute_rhs = timer.solve_timer.compute_rhs
+    return (; n_iterates = length(iterates),
+        dim = matrix.m,
+        nnz = SparseArrays.nnz(matrix),
+        t_factorize,
+        factorize_schur,
+        factorize_pivot,
+        construct_schur,
+        other_factorize = t_factorize - factorize_schur - factorize_pivot - construct_schur,
+        t_solve,
+        solve_schur,
+        solve_pivot,
+        compute_rhs,
+        compute_resid = t_resid,
+        other_backsolve = t_solve - t_resid - solve_schur - solve_pivot - compute_rhs,
+        residual = Statistics.mean(residuals),
+        refine_iter = Statistics.mean(refine_iterations),
+        refine_success,
+    )
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__

@@ -232,6 +232,74 @@ function runtime_experiment(; old = false)
     return first_results, last_results
 end
 
+function flops_experiment()
+    results = NamedTuple[]
+    for modelname in ("mnist", "scopf", "lsv")
+        nodes, layers = last(NN_BY_MODEL[modelname])
+        model, formulation = get_model(modelname, nodes, layers)
+        nlp = NLPModelsJuMP.MathOptNLPModel(model)
+        iterates = vcat(
+            load_iterates(model, modelname, nodes, layers, "first")[1:2],
+            #load_iterates(model, modelname, nodes, layers, "last"),
+        )
+        HSLLinearSolver = HSL_SOLVER_BY_MODEL[modelname]
+        hsl_options = get_linear_solver_options(HSLLinearSolver, model, formulation)
+        schur_options = get_linear_solver_options(MadAI.SchurComplementSolver, model, formulation)
+        matrix_results = benchmark_kkt_matrices(
+            nlp, HSLLinearSolver, hsl_options, schur_options, iterates;
+            ma86_order = MadNLPHSL.AMD,
+        )
+        metadata = (; modelname, nodes, layers, HSLLinearSolver)
+        append!(results, merge.(Ref(metadata), matrix_results))
+    end
+    return summarize_flops_results(results)
+end
+
+function summarize_flops_results(results)
+    results_df = DataFrames.DataFrame(results)
+    group_columns = [:modelname, :nodes, :layers, :HSLLinearSolver, :matrix_type]
+    summary = DataFrames.combine(
+        DataFrames.groupby(results_df, group_columns),
+        DataFrames.nrow => :n_iterates,
+        :dim => first => :dim,
+        :nnz => first => :nnz,
+        :factor_size => Statistics.mean => :factor_nnz,
+        :flops => Statistics.mean => :flops,
+        :n2by2 => Statistics.mean => :n2by2,
+        :t_factorize => Statistics.mean => :t_factorize,
+        :t_solve => Statistics.mean => :t_solve,
+        :residual => Statistics.mean => :residual,
+        :refine_iter => Statistics.mean => :refine_iter,
+        :refine_success => all => :refine_success,
+    )
+    summary.dim = Int.(summary.dim)
+    return summary
+end
+
+function profile_schur_experiment()
+    results = NamedTuple[]
+    for modelname in ("mnist", "scopf", "lsv"),
+        (nodes, layers) in NN_BY_MODEL[modelname]
+        model, formulation = get_model(modelname, nodes, layers)
+        nlp = NLPModelsJuMP.MathOptNLPModel(model)
+        iterates = vcat(
+            load_iterates(model, modelname, nodes, layers, "first"),
+            load_iterates(model, modelname, nodes, layers, "last"),
+        )
+        opt_linear_solver = get_linear_solver_options(
+            MadAI.SchurComplementSolver, model, formulation,
+        )
+        MadNLPLinearSolver = modelname == "lsv" ? MadNLPHSL.Ma86Solver : MadNLPHSL.Ma57Solver
+        result = profile_schur(
+            nlp, opt_linear_solver, iterates;
+            MadNLPLinearSolver,
+            ma86_order = MadNLPHSL.AMD,
+        )
+        push!(results, merge((; modelname, nodes, layers), result))
+    end
+    return DataFrames.DataFrame(results)
+end
+
 function write_runtime_results(first_results, last_results; old = false)
     results_dir = joinpath(@__DIR__, "results")
     mkpath(results_dir)
@@ -323,6 +391,22 @@ function main()
             write_runtime_results(first_results, last_results; old = args["old"])
         end
         return first_results, last_results
+    elseif args["experiment"] == "flops"
+        results = flops_experiment()
+        results_dir = joinpath(@__DIR__, "results")
+        mkpath(results_dir)
+        fpath = joinpath(results_dir, "hsl-flops.csv")
+        CSV.write(fpath, results)
+        println("Saving results to $fpath")
+        return results
+    elseif args["experiment"] == "profile-schur"
+        results = profile_schur_experiment()
+        results_dir = joinpath(@__DIR__, "results")
+        mkpath(results_dir)
+        fpath = joinpath(results_dir, "profile-schur.csv")
+        CSV.write(fpath, results)
+        println("Saving results to $fpath")
+        return results
     end
     error("Unknown experiment: $(args["experiment"])")
 end
