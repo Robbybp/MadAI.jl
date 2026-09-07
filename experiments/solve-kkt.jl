@@ -118,7 +118,7 @@ function solve_kkt(
             linear_solver,
             rhs;
             max_iter = 64,
-            tol = 1e-5,
+            tol = 1e-8,
             full_matrix,
             tril_to_full_view,
         )
