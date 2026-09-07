@@ -6,7 +6,9 @@ import JuMP
 import MadAI
 import MadNLP
 import MadNLPHSL
+import NLPModels
 import NLPModelsJuMP
+import PythonCall
 import Statistics
 import LinearAlgebra
 
@@ -16,6 +18,7 @@ LinearAlgebra.BLAS.lbt_set_num_threads(1)
 include("solve-kkt.jl")
 include("solve-kkt-old.jl")
 include("JuMP/models.jl")
+include("write-latex.jl")
 
 function parse_commandline()
     settings = ArgParse.ArgParseSettings()
@@ -94,6 +97,81 @@ const NN_BY_MODEL = Dict(
         (2048, 3),
     ]
 )
+
+const ACTIVATION_LABELS = Dict(
+    "GELU" => "GELU",
+    "ReLU" => "ReLU",
+    "Sigmoid" => "Sigmoid",
+    "Softmax" => "SoftMax",
+    "Softplus" => "SoftPlus",
+    "Tanh" => "Tanh",
+)
+
+function get_nn_structure(modelname, nodes, layers)
+    nn = get_nn(modelname, nodes, layers)
+    input_dim = nothing
+    output_dim = nothing
+    previous_linear_output = nothing
+    hidden_layers = 0
+    hidden_layer_widths = Int[]
+    activations = String[]
+
+    for layer in nn.children()
+        layer_type = PythonCall.pyconvert(String, layer.__class__.__name__)
+        if layer_type == "Linear"
+            input_dim === nothing && (input_dim = PythonCall.pyconvert(Int, layer.in_features))
+            output_dim = PythonCall.pyconvert(Int, layer.out_features)
+            previous_linear_output = output_dim
+        elseif haskey(ACTIVATION_LABELS, layer_type)
+            layer_type == "Softmax" || begin
+                hidden_layers += 1
+                push!(hidden_layer_widths, previous_linear_output)
+            end
+            layer_label = ACTIVATION_LABELS[layer_type]
+            layer_label ∈ activations || push!(activations, layer_label)
+        end
+    end
+
+    trained_parameters = 0
+    for parameter in nn.parameters()
+        if PythonCall.pyconvert(Bool, parameter.requires_grad)
+            trained_parameters += PythonCall.pyconvert(Int, parameter.numel())
+        end
+    end
+    @assert !isempty(hidden_layer_widths)
+    @assert all(==(first(hidden_layer_widths)), hidden_layer_widths)
+    return (; model = uppercase(modelname), inputs = input_dim, outputs = output_dim,
+        layer_width = first(hidden_layer_widths), layers = hidden_layers, trained_parameters,
+        activations = join(activations, "+"))
+end
+
+function nn_structure_experiment()
+    structures = NamedTuple[]
+    for modelname in ("mnist", "scopf", "lsv"), (nodes, layers) in NN_BY_MODEL[modelname]
+        push!(structures, get_nn_structure(modelname, nodes, layers))
+    end
+    return DataFrames.DataFrame(structures)
+end
+
+function problem_structure_experiment()
+    structures = NamedTuple[]
+    for modelname in ("mnist", "scopf", "lsv"), (nodes, layers) in NN_BY_MODEL[modelname]
+        nn_structure = get_nn_structure(modelname, nodes, layers)
+        model, _ = get_model(modelname, nodes, layers)
+        nlp = NLPModelsJuMP.MathOptNLPModel(model)
+        push!(structures, (;
+            model = nn_structure.model,
+            nodes,
+            layers,
+            trained_parameters = nn_structure.trained_parameters,
+            nvar = NLPModels.get_nvar(nlp),
+            ncon = NLPModels.get_ncon(nlp),
+            nnzj = NLPModels.get_nnzj(nlp),
+            nnzh = NLPModels.get_nnzh(nlp),
+        ))
+    end
+    return DataFrames.DataFrame(structures)
+end
 
 function precompile_runtime_experiment()
     modelname = "mnist"
@@ -212,7 +290,31 @@ end
 
 function main()
     args = parse_commandline()
-    if args["experiment"] == "runtime"
+    if args["experiment"] == "nn-structure"
+        structures = nn_structure_experiment()
+        results_dir = joinpath(@__DIR__, "results")
+        mkpath(results_dir)
+        csv_path = joinpath(results_dir, "nn-structure.csv")
+        latex_path = joinpath(results_dir, "nn-structure.txt")
+        CSV.write(csv_path, structures)
+        write_nn_structure_latex_file(latex_path, structures)
+        println(nn_structure_latex_contents(structures))
+        println("Wrote $csv_path")
+        println("Wrote $latex_path")
+        return structures
+    elseif args["experiment"] == "problem-structure"
+        structures = problem_structure_experiment()
+        results_dir = joinpath(@__DIR__, "results")
+        mkpath(results_dir)
+        csv_path = joinpath(results_dir, "problem-structure.csv")
+        latex_path = joinpath(results_dir, "problem-structure.txt")
+        CSV.write(csv_path, structures)
+        write_problem_structure_latex_file(latex_path, structures)
+        println(problem_structure_latex_contents(structures))
+        println("Wrote $csv_path")
+        println("Wrote $latex_path")
+        return structures
+    elseif args["experiment"] == "runtime"
         precompile_runtime_experiment()
         first_results, last_results = runtime_experiment(; old = args["old"])
         if args["dry-run"]
@@ -226,14 +328,19 @@ function main()
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
-    first_results, last_results = main()
-    println("First iterates")
-    println("--------------")
-    display(summarize_results(first_results))
-    println("Last iterates")
-    println("-------------")
-    display(summarize_results(last_results))
-    println("Combined iterates")
-    println("-----------------")
-    display(summarize_results(vcat(first_results, last_results)))
+    result = main()
+    if result isa DataFrames.DataFrame
+        display(result)
+    else
+        first_results, last_results = result
+        println("First iterates")
+        println("--------------")
+        display(summarize_results(first_results))
+        println("Last iterates")
+        println("-------------")
+        display(summarize_results(last_results))
+        println("Combined iterates")
+        println("-----------------")
+        display(summarize_results(vcat(first_results, last_results)))
+    end
 end
