@@ -33,3 +33,17 @@ data/iterates/scopf-1500nodes10layers-gb-last.json filter=lfs diff=lfs merge=lfs
 data/iterates/scopf-1500nodes10layers-last.json filter=lfs diff=lfs merge=lfs -text
 data/iterates/scopf-500nodes5layers-first.json filter=lfs diff=lfs merge=lfs -text
 data/iterates/scopf-500nodes5layers-last.json filter=lfs diff=lfs merge=lfs -text
+data/iterates/lsv-128nodes3layers-first.json filter=lfs diff=lfs merge=lfs -text
+data/iterates/lsv-128nodes3layers-last.json filter=lfs diff=lfs merge=lfs -text
+data/iterates/lsv-2048nodes3layers-gb-first.json filter=lfs diff=lfs merge=lfs -text
+data/iterates/lsv-32nodes3layers-last.json filter=lfs diff=lfs merge=lfs -text
+data/iterates/lsv-512nodes3layers-first.json filter=lfs diff=lfs merge=lfs -text
+data/iterates/lsv-2048nodes3layers-first.json filter=lfs diff=lfs merge=lfs -text
+data/iterates/lsv-2048nodes3layers-gb-last.json filter=lfs diff=lfs merge=lfs -text
+data/iterates/lsv-2048nodes3layers-last.json filter=lfs diff=lfs merge=lfs -text
+data/iterates/lsv-32nodes3layers-first.json filter=lfs diff=lfs merge=lfs -text
+data/iterates/lsv-512nodes3layers-last.json filter=lfs diff=lfs merge=lfs -text
+data/weights/lsv-sigmoid2048nodes3layers.pt filter=lfs diff=lfs merge=lfs -text
+data/weights/lsv-sigmoid32nodes3layers.pt filter=lfs diff=lfs merge=lfs -text
+data/weights/lsv-sigmoid512nodes3layers.pt filter=lfs diff=lfs merge=lfs -text
+data/weights/lsv-sigmoid128nodes3layers.pt filter=lfs diff=lfs merge=lfs -text
