@@ -45,10 +45,11 @@ const HSL_SOLVER_BY_MODEL = Dict(
 const HSL_OPTIONS_LOOKUP = Dict(
     MadNLPHSL.Ma57Solver => MadNLPHSL.Ma57Options(; ma57_pivot_order = 2), # AMD
     MadNLPHSL.Ma86Solver => MadNLPHSL.Ma86Options(; ma86_order = MadNLPHSL.AMD, ma86_num_threads = 1),
+    MadNLPHSL.Ma97Solver => MadNLPHSL.Ma97Options(; ma97_order = MadNLPHSL.AMD, ma97_num_threads = 1),
 )
 
 function get_linear_solver_options(LinearSolver, model, formulation)
-    if LinearSolver in values(HSL_SOLVER_BY_MODEL)
+    if haskey(HSL_OPTIONS_LOOKUP, LinearSolver)
         return HSL_OPTIONS_LOOKUP[LinearSolver]
     end
 
@@ -171,6 +172,61 @@ function problem_structure_experiment()
         ))
     end
     return DataFrames.DataFrame(structures)
+end
+
+function matrix_structure_experiment()
+    structures = NamedTuple[]
+    for modelname in ("mnist", "scopf", "lsv"), (nodes, layers) in NN_BY_MODEL[modelname]
+        model, formulation = get_model(modelname, nodes, layers)
+        nlp = NLPModelsJuMP.MathOptNLPModel(model)
+        opt_linear_solver = get_linear_solver_options(
+            MadAI.SchurComplementSolver, model, formulation,
+        )
+        MadNLPLinearSolver = modelname == "lsv" ? MadNLPHSL.Ma86Solver : MadNLPHSL.Ma57Solver
+        matrix_structures = get_matrices_structure(
+            nlp, opt_linear_solver;
+            MadNLPLinearSolver,
+            ma86_order = MadNLPHSL.AMD,
+        )
+        append!(structures, merge.(Ref((; modelname, nodes, layers)), matrix_structures))
+    end
+    return DataFrames.DataFrame(structures)
+end
+
+function compare_hsl_experiment()
+    results = NamedTuple[]
+    HSLLinearSolvers = (
+        MadNLPHSL.Ma57Solver,
+        MadNLPHSL.Ma86Solver,
+        MadNLPHSL.Ma97Solver,
+    )
+    for modelname in ("mnist", "scopf", "lsv"), (nodes, layers) in NN_BY_MODEL[modelname]
+        model, formulation = get_model(modelname, nodes, layers)
+        nlp = NLPModelsJuMP.MathOptNLPModel(model)
+        iterates = load_iterates(model, modelname, nodes, layers, "first")[1:1]
+        is_largest = (nodes, layers) == last(NN_BY_MODEL[modelname])
+        for LinearSolver in HSLLinearSolvers
+            excluded = (
+                LinearSolver === MadNLPHSL.Ma97Solver &&
+                is_largest && modelname in ("mnist", "scopf")
+            ) || (
+                modelname == "lsv" && is_largest &&
+                LinearSolver in (MadNLPHSL.Ma57Solver, MadNLPHSL.Ma97Solver)
+            )
+            excluded && continue
+
+            opt_linear_solver = get_linear_solver_options(LinearSolver, model, formulation)
+            MadNLPLinearSolver = modelname == "lsv" ? MadNLPHSL.Ma86Solver : MadNLPHSL.Ma57Solver
+            iterate_results = solve_kkt(
+                nlp, LinearSolver, opt_linear_solver, iterates;
+                MadNLPLinearSolver,
+                ma86_order = MadNLPHSL.AMD,
+            )
+            metadata = (; modelname, nodes, layers, LinearSolver)
+            append!(results, merge.(Ref(metadata), iterate_results))
+        end
+    end
+    return DataFrames.DataFrame(results)
 end
 
 function precompile_runtime_experiment()
@@ -382,6 +438,29 @@ function main()
         println("Wrote $csv_path")
         println("Wrote $latex_path")
         return structures
+    elseif args["experiment"] == "matrix-structure"
+        structures = matrix_structure_experiment()
+        results_dir = joinpath(@__DIR__, "results")
+        mkpath(results_dir)
+        csv_path = joinpath(results_dir, "matrix-structure.csv")
+        latex_path = joinpath(results_dir, "matrix-structure.txt")
+        CSV.write(csv_path, structures)
+        write_matrix_structure_latex_file(latex_path, structures)
+        println(matrix_structure_latex_contents(structures))
+        println("Wrote $csv_path")
+        println("Wrote $latex_path")
+        return structures
+    elseif args["experiment"] == "compare-hsl"
+        results = compare_hsl_experiment()
+        results_dir = joinpath(@__DIR__, "results")
+        mkpath(results_dir)
+        csv_path = joinpath(results_dir, "compare-hsl.csv")
+        latex_path = joinpath(results_dir, "compare-hsl.txt")
+        CSV.write(csv_path, results)
+        write_compare_hsl_latex_file(latex_path, results)
+        println("Saving results to $csv_path")
+        println("Wrote $latex_path")
+        return results
     elseif args["experiment"] == "runtime"
         precompile_runtime_experiment()
         first_results, last_results = runtime_experiment(; old = args["old"])

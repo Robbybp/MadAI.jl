@@ -46,6 +46,7 @@ function solver_label(LinearSolver)
     solver = string(LinearSolver)
     occursin("Ma57Solver", solver) && return "MA57"
     occursin("Ma86Solver", solver) && return "MA86"
+    occursin("Ma97Solver", solver) && return "MA97"
     occursin("SchurComplementSolver", solver) && return "Ours"
     error("Unknown linear solver: $solver")
 end
@@ -191,6 +192,129 @@ end
 function write_problem_structure_latex_file(fpath, structures::DataFrames.DataFrame)
     open(fpath, "w") do io
         print(io, problem_structure_latex_contents(structures))
+    end
+    return fpath
+end
+
+function matrix_structure_latex_contents(structures::DataFrames.DataFrame)
+    structures = copy(structures)
+    structures.model_label = uppercase.(structures.modelname)
+    matrix_labels = Dict(
+        "Original KKT" => "KKT",
+        "A" => "\$A\$",
+        "B" => "\$B\$",
+        "Pivot" => "Pivot matrix (\$C\$)",
+        "Schur" => "Schur complement (\$S\$)",
+    )
+    structures.matrix_label = [matrix_labels[row.matrix_type] for row in DataFrames.eachrow(structures)]
+    model_order = Dict("mnist" => 1, "scopf" => 2, "lsv" => 3)
+    matrix_order = Dict("Original KKT" => 1, "A" => 2, "B" => 3, "Pivot" => 4, "Schur" => 5)
+    structures.model_order = [model_order[row.modelname] for row in DataFrames.eachrow(structures)]
+    structures.matrix_order = [matrix_order[row.matrix_type] for row in DataFrames.eachrow(structures)]
+    DataFrames.sort!(structures, [:model_order, :nodes, :layers, :matrix_order])
+
+    headers = ["Model", "NN param.", "Matrix", "N. row", "N. col", "NNZ"]
+    rows = Vector{Vector{String}}()
+    group_breaks = Set{Int}()
+    groups = DataFrames.groupby(structures, [:model_label, :nodes, :layers]; sort = false)
+    for (group_index, group) in enumerate(groups)
+        nrows = DataFrames.nrow(group)
+        for (row_index, row) in enumerate(DataFrames.eachrow(group))
+            repeated = row_index == 1
+            push!(rows, [
+                repeated ? "\\multirow{$nrows}{*}{$(row.model_label)}" : "",
+                repeated ? "\\multirow{$nrows}{*}{$(format_nn_parameters(nn_parameter_count(row.modelname, row.nodes, row.layers)))}" : "",
+                row.matrix_label,
+                format_count(row.nrow),
+                format_count(row.ncol),
+                format_count(row.nnz),
+            ])
+        end
+        group_index < length(groups) && push!(group_breaks, length(rows))
+    end
+    widths = [maximum(length(row[column]) for row in vcat([headers], rows)) for column in eachindex(headers)]
+    format_row(row) = join(rpad.(row, widths), " & ") * " \\\\"
+
+    lines = [format_row(headers), "\\midrule"]
+    for (row_index, row) in enumerate(rows)
+        push!(lines, format_row(row))
+        row_index in group_breaks && push!(lines, "\\midrule")
+    end
+    return join(lines, "\n")
+end
+
+function write_matrix_structure_latex_file(fpath, structures::DataFrames.DataFrame)
+    open(fpath, "w") do io
+        print(io, matrix_structure_latex_contents(structures))
+    end
+    return fpath
+end
+
+function compare_hsl_latex_contents(results::DataFrames.DataFrame)
+    results = copy(results)
+    results.solver_label = solver_label.(results.LinearSolver)
+    solver_labels = ("MA57", "MA86", "MA97")
+    model_order = ("mnist", "scopf", "lsv")
+    lookup = Dict(
+        (row.modelname, row.nodes, row.layers, row.solver_label) => row
+        for row in DataFrames.eachrow(results)
+    )
+
+    headers = ["Model", "Solver", "NN param.", "Initialize", "Factorize", "Backsolve", "Residual"]
+    rows = Vector{Vector{String}}()
+    solver_breaks = Set{Int}()
+    model_breaks = Set{Int}()
+    format_compare_runtime(value) = value < 0.01 ? "\$< 0.01\$" : format_runtime(value)
+    for (model_index, modelname) in enumerate(model_order)
+        model_results = results[results.modelname .== modelname, :]
+        nn_pairs = unique([(row.nodes, row.layers) for row in DataFrames.eachrow(model_results)])
+        sort!(nn_pairs)
+        nrows = length(solver_labels) * length(nn_pairs)
+        for (solver_index, solver) in enumerate(solver_labels)
+            for (nn_index, (nodes, layers)) in enumerate(nn_pairs)
+                row = get(lookup, (modelname, nodes, layers, solver), nothing)
+                nparameters = format_nn_parameters(nn_parameter_count(modelname, nodes, layers))
+                if row === nothing
+                    push!(rows, [
+                        solver_index == 1 && nn_index == 1 ? "\\multirow{$nrows}[3]{*}{$(uppercase(modelname))}" : "",
+                        nn_index == 1 ? "\\multirow{$(length(nn_pairs))}{*}{$solver}" : "",
+                        nparameters * "*",
+                        "--", "--", "--", "--",
+                    ])
+                else
+                    push!(rows, [
+                        solver_index == 1 && nn_index == 1 ? "\\multirow{$nrows}[3]{*}{$(uppercase(modelname))}" : "",
+                        nn_index == 1 ? "\\multirow{$(length(nn_pairs))}{*}{$solver}" : "",
+                        nparameters,
+                        format_compare_runtime(row.t_init),
+                        format_compare_runtime(row.t_factorize),
+                        format_compare_runtime(row.t_solve),
+                        format_residual(row.residual),
+                    ])
+                end
+            end
+            solver_index < length(solver_labels) && push!(solver_breaks, length(rows))
+        end
+        model_index < length(model_order) && push!(model_breaks, length(rows))
+    end
+
+    widths = [maximum(length(row[column]) for row in vcat([headers], rows)) for column in eachindex(headers)]
+    format_row(row) = join(rpad.(row, widths), " & ") * " \\\\"
+    lines = [format_row(headers), "\\midrule"]
+    for (row_index, row) in enumerate(rows)
+        push!(lines, format_row(row))
+        if row_index in solver_breaks
+            push!(lines, rpad("", widths[1]) * " \\cmidrule(ll){2-7}")
+        elseif row_index in model_breaks
+            push!(lines, "\\midrule")
+        end
+    end
+    return join(lines, "\n")
+end
+
+function write_compare_hsl_latex_file(fpath, results::DataFrames.DataFrame)
+    open(fpath, "w") do io
+        print(io, compare_hsl_latex_contents(results))
     end
     return fpath
 end
@@ -353,19 +477,26 @@ function add_iteration_labels(results; last = false)
 end
 
 function complete_runtime_latex_contents(first_results, last_results)
-    summary = summarize_runtime_results(vcat(first_results, last_results))
-    speedup = Dict(
-        (row.modelname, row.nodes, row.layers, string(row.LinearSolver)) => row.speedup
-        for row in DataFrames.eachrow(summary)
-    )
     results = vcat(
         add_iteration_labels(first_results),
         add_iteration_labels(last_results; last = true),
     )
     results.model_label = uppercase.(results.modelname)
     results.solver_label = solver_label.(results.LinearSolver)
+    baseline_times = Dict(
+        (row.modelname, row.nodes, row.layers, row.iterate_set_order, row.iteration_order) =>
+        row.t_factorize + row.t_solve
+        for row in DataFrames.eachrow(results)
+        if occursin(r"MadNLPHSL\.Ma(57|86)Solver", string(row.LinearSolver))
+    )
     results.speedup = [
-        speedup[(row.modelname, row.nodes, row.layers, string(row.LinearSolver))]
+        occursin("SchurComplementSolver", string(row.LinearSolver)) ?
+        get(
+            baseline_times,
+            (row.modelname, row.nodes, row.layers, row.iterate_set_order, row.iteration_order),
+            NaN,
+        ) / (row.t_factorize + row.t_solve) :
+        NaN
         for row in DataFrames.eachrow(results)
     ]
     model_order = Dict("mnist" => 1, "scopf" => 2, "lsv" => 3)
@@ -392,7 +523,7 @@ function complete_runtime_latex_contents(first_results, last_results)
                 format_runtime(row.t_solve),
                 string(row.nneg_eig),
                 format_residual(row.residual),
-                format_runtime(row.refine_iter),
+                string(round(Int, row.refine_iter)),
                 format_speedup(row.speedup),
             ])
         end
@@ -478,6 +609,13 @@ function write_latex_main()
         results = CSV.read(joinpath(results_dir, "profile-schur.csv"), DataFrames.DataFrame)
         fpath = write_profile_schur_latex_file(joinpath(results_dir, "profile-schur.txt"), results)
         print(profile_schur_latex_contents(results))
+        println("\nWrote $fpath")
+        return results
+    elseif args["experiment"] == "compare-hsl"
+        results_dir = joinpath(@__DIR__, "results")
+        results = CSV.read(joinpath(results_dir, "compare-hsl.csv"), DataFrames.DataFrame)
+        fpath = write_compare_hsl_latex_file(joinpath(results_dir, "compare-hsl.txt"), results)
+        print(compare_hsl_latex_contents(results))
         println("\nWrote $fpath")
         return results
     end
