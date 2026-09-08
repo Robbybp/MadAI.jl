@@ -117,6 +117,37 @@ function iterate_to_kkt(nlp::NLPModelsJuMP.MathOptNLPModel, iterate::Dict)
     return iterate_to_kkt(madnlp, iterate)
 end
 
+function get_matrices_structure(
+    nlp,
+    opt_linear_solver;
+    MadNLPLinearSolver::Type{<:MadNLP.AbstractLinearSolver} = MadNLPHSL.Ma57Solver,
+    kwds...,
+)
+    madnlp = MadNLP.MadNLPSolver(nlp; linear_solver = MadNLPLinearSolver, kwds...)
+    MadNLP.initialize!(madnlp)
+    kkt_matrix = MadNLP.get_kkt(MadNLP.get_kkt(madnlp))
+    schur_solver = MadAI.SchurComplementSolver(kkt_matrix; opt = opt_linear_solver)
+
+    pivot_indices = schur_solver.pivot_indices
+    pivot_index_set = Set(pivot_indices)
+    reduced_indices = filter(i -> !(i in pivot_index_set), 1:kkt_matrix.n)
+    A = kkt_matrix[reduced_indices, reduced_indices]
+    B = kkt_matrix[pivot_indices, reduced_indices] +
+        kkt_matrix[reduced_indices, pivot_indices]'
+
+    matrices = (
+        ("Original KKT", kkt_matrix),
+        ("A", A),
+        ("B", B),
+        ("Pivot", schur_solver.pivot_solver.csc),
+        ("Schur", schur_solver.reduced_solver.csc),
+    )
+    return [
+        (; matrix_type, nrow = Int(matrix.m), ncol = Int(matrix.n), nnz = SparseArrays.nnz(matrix))
+        for (matrix_type, matrix) in matrices
+    ]
+end
+
 function iterate_to_kkt(madnlp::MadNLP.MadNLPSolver, iterate::Dict)
     x = iterate["primal"]
     y = iterate["dual"]
